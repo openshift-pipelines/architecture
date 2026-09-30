@@ -21,8 +21,17 @@ This repo is for **OpenShift Pipelines product decisions** only. See [docs/scope
 
 ### 1. Create your ADR
 
-Copy the template:
+You can draft your ADR manually or use your AI agent (which automatically reads [`AGENTS.md`](AGENTS.md) and loads the built-in skill `skills/adr/SKILL.md`):
 
+**Option A: Using an AI Agent (Claude Code, Pi, Cursor, etc.)**
+```bash
+# In Claude Code or Pi:
+/adr "My proposed decision"
+# Or in Cursor/Copilot:
+"Help me draft an ADR for <my proposed decision>"
+```
+
+**Option B: Manual copy**
 ```bash
 cp ADR/0000-adr-template.md ADR/00XX-my-decision.md
 ```
@@ -41,11 +50,11 @@ Use the next available number. Fill in all sections.
 - Significant ADRs may be announced in team meetings
 - Address all feedback
 
-### 4. Acceptance
+### 4. Lifecycle, Review & Acceptance
 
-- Maintainers approve or request changes
-- Once merged, the ADR is considered accepted
-- Update status to "Accepted" or "Implemented" as appropriate
+- **Iterative Drafting**: ADRs do **not** need to be fully complete or `Accepted` to be merged. Authors are encouraged to open and merge early drafts with `status: proposed` once the context, scope, and initial shape are captured, and iterate collaboratively on design details, alternatives, and consequences in follow-up PRs.
+- **Discussion**: ADRs are discussed in PR comments and team meetings.
+- **Acceptance**: Once the decision reaches consensus and fulfills the acceptance criteria defined in the template, a PR transitions the ADR status from `proposed` to `accepted`. When implemented in the product, it moves to `implemented`.
 
 ## Style guidelines
 

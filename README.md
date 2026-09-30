@@ -55,6 +55,19 @@ docs/          # Additional documentation
 - [ADR Template](ADR/0000-adr-template.md)
 - [Contributing Guide](CONTRIBUTING.md)
 - [Scope Definition](docs/scope.md)
+- [ADR Skill](skills/adr/SKILL.md)
+
+## Authoring ADRs with AI Agents
+
+This repository includes an interactive **ADR Assistant Skill** (`skills/adr/`) modeled after structured rubber-duck grilling to help stress-test architecture decisions, explore trade-offs, and draft ADRs.
+
+AI coding agents (Claude Code, Pi, Cursor, Copilot, Codex, etc.) will read [`AGENTS.md`](AGENTS.md) when working in this repository and automatically know how to load and use the ADR skill.
+
+You can also invoke it directly:
+- **Claude Code**: Run `/adr <topic>` (or start with `--plugin-dir .`)
+- **Pi**: Automatic via `AGENTS.md` or invoke `/adr <topic>`
+- **Cursor / Copilot / Other Agents**: Automatic via `AGENTS.md` or simply ask:
+  > *"Help me draft an ADR for `<topic>`."*
 
 ## Related
 
