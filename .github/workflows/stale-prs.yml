@@ -1,0 +1,34 @@
+name: Close stale PRs
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark stale PRs and close rotten PRs
+        uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          days-before-pr-stale: 60
+          days-before-pr-close: 30
+          stale-pr-label: 'lifecycle/stale'
+          close-pr-label: 'lifecycle/rotten'
+          stale-pr-message: |
+            This pull request has been inactive for 30 days and is now marked as stale.
+            It will automatically close in 60 days if no further activity occurs.
+            If you plan to continue this work, please add commits or request a review to keep it open.
+          close-pr-message: |
+            This pull request was automatically closed due to 90 days of inactivity.
+            You can reopen this PR or create a new one if you'd like to continue this work.
+          remove-stale-when-updated: true
+          operations-per-run: 50
