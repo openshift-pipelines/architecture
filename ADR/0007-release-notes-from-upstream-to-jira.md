@@ -110,20 +110,22 @@ docs dashboard
 docs team
 ```
 
-1. **At the pull request.** Every pull request in an upstream repository that ships in the product carries a release-note block. A change that users will not notice says `NONE`. A CI check fails the pull request when the block is missing. A change that needs a note names its SRVKP ticket.
-2. **At merge.** jirasync, in openshift-pipelines/skipjira, finds the ticket for each merged pull request. It copies the release-note block into Release Note Text, sets Release Note Type from the pull request's kind, links the pull request in Git Pull Request, and sets Release Note Status to Awaiting Approval. When a pull request has no block, jirasync drafts the text with Gemini, as it does today, and the owner checks that draft in the next step. Today jirasync posts the note as a comment and a person copies it.
-3. **At the dashboard.** Every note waits for a person who knows the change. The owner opens the release-notes dashboard, reads the note and approves or rejects it. Approval sets Release Note Status to Proposed, and the ticket reaches the docs dashboard. Rejection sets Release Note Type to Not Required and the status to Rejected. A bot account makes the change and adds a Jira comment such as "Approved by Jane Doe (jdoe@redhat.com) on the release-notes dashboard, 2026-10-18 14:02 UTC". Any engineer who signs in can decide. A Slack app posts a daily summary of the waiting tickets to each team's channel, and sends the owner a direct message when a ticket has waited 3 days.
-4. **At release time.** A script in one-click-release lists every upstream change between the previous release's downstream tag and the core snapshot of the new one. It builds on the collector in theakshaypant/osp-rc-tools. It gives each change one verdict and puts the ones that need action first. The Release Captain works from that list in their view of the dashboard. By the docs deadline, three weeks before release, each remaining change gets one of two outcomes. Either the Release Captain marks it not required, or the docs team writes it from the pull request and the owner reviews it. The number still empty at the deadline goes to the release retrospective.
+1. **At the pull request.** Every pull request in an upstream repository that ships in the product carries a release-note block. A change that users will not notice says `NONE`. A CI check fails the pull request when the block is missing. A change that needs a note has an SRVKP ticket, and the ticket names the pull request in its Git Pull Request field. Upstream pull requests carry no Jira keys.
+2. **At merge.** jirasync, in openshift-pipelines/skipjira, finds the ticket for each merged pull request. It copies the release-note block into Release Note Text, sets Release Note Type from the pull request's kind, links the pull request in Git Pull Request, and sets Release Note Status to Awaiting Approval. When a pull request has no block, jirasync drafts the text with Gemini, as it does today, and the owner checks that draft in the next step. Today jirasync posts the note as a comment and a person copies it. jirasync cannot read pull requests in private forks, which hold embargoed security fixes. Their tickets are filled by hand. Most are CVE fixes, which go in the advisory and not in the notes.
+3. **At the dashboard.** Every note waits for a person who knows the change. The owner opens the release-notes dashboard, reads the note and approves or rejects it. Approval sets Release Note Status to Proposed, and the ticket reaches the docs dashboard. The docs team then gives a second approval. A writer accepts the note, rewrites it, or sends it back to the owner with a Jira comment. Done stays the docs team's own status, set after QE review. Rejection sets Release Note Type to Not Required and the status to Rejected. A bot account makes the change and adds a Jira comment such as "Approved by Jane Doe (jdoe@redhat.com) on the release-notes dashboard, 2026-10-18 14:02 UTC". Any engineer who signs in can decide. A Slack app posts a daily summary of the waiting tickets to each team's channel, and sends the owner a direct message when a ticket has waited 3 days.
+4. **At release time.** A script in one-click-release lists every upstream change between the previous release's downstream tag and the core snapshot of the new one. It builds on the collector in theakshaypant/osp-rc-tools. It gives each change one verdict and puts the ones that need action first. The Release Captain works from that list in their view of the dashboard. By the docs deadline, three weeks before release, each remaining change gets one of two outcomes. Either the owner marks it not required, or the docs team writes it from the pull request and the owner reviews it. The Release Captain chases owners but does not decide for them. The number still empty at the deadline goes to the release retrospective.
 
 | Verdict | Meaning | Who acts |
 |---|---|---|
-| no ticket | The change needs a note and has no SRVKP ticket | The owner creates one |
+| no ticket | The change needs a note and has no SRVKP ticket | The owner creates one or links an existing one, from the dashboard |
 | fields missing | The ticket exists, but a release-note field or the version is empty | The owner |
 | awaiting approval | The note is on the ticket, but nobody has approved or rejected it | The owner, or another engineer on the component |
 | ready | Every field is set and the ticket is on the dashboard | Nobody |
 | not required | The change needs no note, or its owner rejected the note | Nobody |
 | CVE | A security fix. It goes in the advisory, never in the notes | Nobody |
 | other release | It shipped in an earlier release | Nobody |
+
+The dashboard offers both in one click. Create opens a new SRVKP ticket with Git Pull Request, Release Note Text and Release Note Type filled from the pull request. Link takes an existing ticket key and fills its Git Pull Request field. The bot account makes both changes, as it does for approvals.
 
 ### Implementation Details
 
@@ -169,7 +171,7 @@ Before the dashboard is built, a proof of concept answers four questions against
 
 - [ ] A Red Hat SSO login on the dashboard maps to the right Jira account, so the comment names the right person.
 - [ ] A Jira service account can set Release Note Status and Release Note Type and add a comment on any SRVKP ticket.
-- [ ] Red Hat's Slack admins approve an app with `chat:write`, and the lookup from a Jira email to a Slack user works for direct messages. If it does not, the app posts to team channels only.
+- [ ] Red Hat's Slack admins approve an app with `chat:write`, and the lookup from a Jira email to a Slack user works for direct messages. If the lookup is blocked, the app reads Slack ids from the list the team already keeps for GitHub ids, with a Slack column added. If neither works, it posts to team channels only.
 - [ ] How many approvals one release asks of each team. The 1.24.0 numbers suggest about 15.
 
 ## Operational Readiness
@@ -246,6 +248,7 @@ The decision is considered accepted when:
   - Approvals can pile up. The Slack reminders and the Release Captain's view are there to catch it.
   - Owners may approve their own note from the pull request without reading it again.
   - A developer may write `NONE` on a change that needs a note. The check catches this only when a ticket exists.
+  - The team may not fill the Git Pull Request field reliably. Today it is filled on about half the tickets in a release. The Jira "Git PR Check" automation from SRVKP-14379 and the check's "no ticket" verdict catch the gaps, but only before the docs deadline if owners act on them.
   - Changes with nothing in the pull request to go on stay invisible to the check, see Testability.
   - If nobody owns the tools, they can break and nobody notices.
 - Follow-up:
