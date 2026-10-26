@@ -140,6 +140,140 @@ The dashboard offers both in one click. Create opens a new SRVKP ticket with Git
 
 Affected components are every upstream repository in the product, openshift-pipelines/skipjira, openshift-pipelines/one-click-release, the SRVKP Jira project and its automation, the [docs dashboard](https://redhat.atlassian.net/jira/dashboards/22264), the new release-notes dashboard and its Slack app.
 
+## Implementation Plan
+
+`Optional`
+
+The work is 18 items under the epic [SRVKP-14410](https://redhat.atlassian.net/browse/SRVKP-14410). The 1.25 code freeze is at the end of November 2026. 1.25 gets the release-time check and a jirasync dry run. 1.26 gets jirasync writing to Jira, the CI checks, the dashboard and the Slack app.
+
+| # | Type | Work | Points | Needs | Release |
+|---|---|---|---|---|---|
+| 1 | Task | Agree the Release Note Status values with the docs team | 0 | - | 1.25 |
+| 2 | Task | Jira field, automation and gadget changes | 2 | 1 | 1.25 |
+| 3 | Story | Move the collector into one-click-release | 3 | - | 1.25 |
+| 4 | Story | Build the release-time check | 3 | 3 | 1.25 |
+| 5 | Task | Run the check at the 1.25 freeze | 3 | 4 | 1.25 |
+| 6 | Story | jirasync reads the release-note block | 2 | - | 1.25 |
+| 7 | Story | jirasync dry run over 1.25 | 3 | 6 | 1.25 |
+| 8 | Story | jirasync writes the release-note fields | 3 | 2, 7 | 1.26 |
+| 9 | Story | CI check in warn mode for Pipelines as Code | 3 | - | 1.25 if time allows, else 1.26 |
+| 10 | Story | CI check in warn mode for the other upstream repositories | 3 | 9 | 1.26 |
+| 11 | Story | CI check on downstream repositories | 2 | 9 | 1.26 |
+| 12 | Spike | Dashboard proof of concept | 5 | - | Start in 1.25, finish in 1.26 |
+| 13 | Story | Dashboard owner view | 5 | 8, 12 | 1.26 |
+| 14 | Story | Dashboard ticket create and link | 3 | 13 | 1.26 |
+| 15 | Story | Dashboard Release Captain view | 3 | 5, 13 | 1.26 |
+| 16 | Story | Slack app | 5 | 8, 12 | 1.26 |
+| 17 | Task | Deploy the dashboard and the Slack app | 3 | 14, 15, 16 | 1.26 |
+| 18 | Task | Switch the CI checks from warn to fail | 1 | 9, 10 | 1.26 or 1.27 |
+
+Total: 52 points.
+
+### 1. Agree the Release Note Status values with the docs team
+
+- 12 SRVKP tickets already use Release Note Status Rejected. Ask the docs team what it means to them.
+- If it means what this ADR needs, a rejection uses it. If not, a rejection sets only Release Note Type Not Required.
+- Agree the new value Awaiting Approval, and that the owner's approval moves it to Proposed.
+
+### 2. Jira field, automation and gadget changes
+
+- An SRVKP admin adds Awaiting Approval to the Release Note Status field.
+- An SRVKP admin changes the automation that copies fix version into target version. Developers set target version and the Release Captain sets fix version, so the copy runs the wrong way.
+- The docs team adds Awaiting Approval to the "needs attention" gadget on the docs dashboard, so writers still see these tickets.
+- Done when all three changes are live.
+
+### 3. Move the collector into one-click-release
+
+- The collector in theakshaypant/osp-rc-tools lists the upstream changes in a release.
+- Move it into openshift-pipelines/one-click-release so the team owns it and the check builds on it.
+
+### 4. Build the release-time check
+
+- The range runs from the previous release's downstream tag to the core snapshot of the new one.
+- Each change gets one verdict from the table in the Decision section. The changes that need action come first.
+- Unit tests run on saved GitHub and Jira responses. The 1.24.0 freeze replay is a regression test.
+
+### 5. Run the check at the 1.25 freeze
+
+- Run the check as a GitHub Actions workflow in openshift-pipelines, with the Jira and GitHub tokens as repository secrets.
+- Give the list to the 1.25 Release Captain at the freeze.
+- Take the counts per verdict to the 1.25 retrospective.
+- Decide whether the check runs once at the freeze or every week through the cycle.
+
+### 6. jirasync reads the release-note block
+
+- Today jirasync looks for a second-level heading, while the Tekton pull request template uses a first-level one. So it misses the note the author wrote and drafts one with Gemini.
+- Read the Tekton release-note block. When the block says `NONE`, write nothing.
+
+### 7. jirasync dry run over 1.25
+
+- Run jirasync once over every pull request merged in the 1.25 range, writing nothing to Jira.
+- Record what it would write on each ticket.
+- At the freeze, compare that with what people wrote, and fix what it gets wrong.
+
+### 8. jirasync writes the release-note fields
+
+- jirasync fills Release Note Text, Release Note Type and Git Pull Request, and sets Release Note Status to Awaiting Approval.
+- It never overwrites a ticket someone has already decided. When a ticket gets a second pull request, it appends the note and asks for approval again.
+- When the dashboard is switched off, it sets Proposed instead, so no ticket is stuck.
+- Each night it reports how many pull requests it linked and how many it skipped.
+
+### 9. CI check in warn mode for Pipelines as Code
+
+- Add a check that warns when a pull request has no release-note block.
+- Pipelines as Code comes first. In 1.24.0 it had 46 of the 59 changes with no block.
+- The Pipelines as Code maintainers have to agree to the check.
+
+### 10. CI check in warn mode for the other upstream repositories
+
+- Add the same check to console-plugin, opc, tekton-kueue and the smaller openshift-pipelines repositories.
+- Each repository's maintainers have to agree to the check.
+
+### 11. CI check on downstream repositories
+
+- Run the same check on downstream repositories, only on pull requests that people open.
+- Bot pull requests keep flowing without it.
+
+### 12. Dashboard proof of concept
+
+- Answer the four questions under Testability against a sandbox Jira project and a test Slack app.
+- Decide where the dashboard and the Slack app run, and who runs them.
+- The requests for the SSO client, the Jira service account and the Slack app go out in the first week, since they take the longest.
+
+### 13. Dashboard owner view
+
+- People sign in with Red Hat SSO.
+- An owner sees the tickets waiting for them, reads each note, and approves or rejects it.
+- A Jira service account makes the change and adds a comment that names who decided.
+
+### 14. Dashboard ticket create and link
+
+- For a change with no ticket, create opens a new SRVKP ticket with Git Pull Request, Release Note Text and Release Note Type filled from the pull request.
+- Link takes an existing ticket key and fills its Git Pull Request field.
+- Filters for my tickets and my component.
+
+### 15. Dashboard Release Captain view
+
+- The check's list for the release, grouped by verdict.
+- Who has to act on each change, and how long each ticket has waited.
+- The Release Captain cannot approve on an owner's behalf.
+
+### 16. Slack app
+
+- A daily summary of the waiting tickets in each team's channel.
+- A direct message to the owner when a ticket has waited 3 days.
+- It looks up Slack users by email. If that is blocked, it uses a Slack column in the team's list of GitHub ids. If neither works, it posts to team channels only.
+
+### 17. Deploy the dashboard and the Slack app
+
+- Deploy both where item 12 decided.
+- Turn on jirasync's Awaiting Approval mode at the same time, so owners have somewhere to approve.
+
+### 18. Switch the CI checks from warn to fail
+
+- A repository's check warns for one release, then fails pull requests from the next.
+- The epic closes when Pipelines as Code fails pull requests. Later switches are filed outside the epic.
+
 ## Security & Compliance
 
 `Optional`
