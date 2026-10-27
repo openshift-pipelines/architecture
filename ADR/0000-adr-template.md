@@ -23,6 +23,8 @@ tags:
 
 # ADR-XXXX: [Title of the Decision]
 
+*While creating ADRs, create PR with number as 'XXXX' placeholders for architectural decision record numbering. When the ADR is being reviewed, the reviewer will provide a number for ADR.*
+
 ## Context
 
 `Required`
