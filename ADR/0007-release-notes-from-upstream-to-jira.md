@@ -135,7 +135,7 @@ The dashboard offers both in one click. Create opens a new SRVKP ticket with Git
 
 - **Upstream repositories.** Add a release-note check to each repository that lacks one. Pipelines as Code, console-plugin, opc and the smaller openshift-pipelines repositories have no release-note block today. Pipelines as Code comes first: in 1.24.0 it had 46 of the 59 changes with no block.
 - **Downstream repositories.** Run the same check only on pull requests that people open, so bot pull requests keep flowing.
-- **jirasync.** skipjira#30 is merged. It stops jirasync moving tickets back out of Release Pending, the bug that got it switched off. Next, jirasync reads the Tekton release-note block, writes the fields instead of a comment and sets Awaiting Approval. It never overwrites a ticket someone has already decided. When a ticket gets a second pull request, it appends the note and asks for approval again.
+- **jirasync.** skipjira#30 is merged. It stops jirasync moving tickets back out of Release Pending, the bug that got it switched off. Next, jirasync reads the Tekton release-note block, writes the fields instead of a comment and sets Awaiting Approval. jirasync never compares the text on a ticket with the text in a pull request. It keeps its own record instead: each time it copies a note, it adds a Jira comment that names the pull request. When a ticket names a pull request that has no such comment yet, jirasync adds that note as a new paragraph and leaves the existing text as it is. It then sets Awaiting Approval again, so the owner sees the addition. If the docs team has set Done, jirasync only adds a comment and changes nothing else. It skips backport pull requests that bots open, because they carry the same note as the original. It never changes text a person has written or approved.
 - **Jira.** Expect the Git Pull Request field on every ticket except CVE, spike and docs tickets. Add Awaiting Approval to the Release Note Status field, and add it to the docs dashboard's "needs attention" gadget so writers still see these tickets. Change the automation that copies fix version into target version, because it runs the opposite way to the rule above.
 - **Release-time check.** Move the collector into openshift-pipelines. Add the range from the downstream tag to the snapshot, the verdicts and the list.
 - **Release-notes dashboard.** One internal page with two views, one for owners to approve or reject, one for the Release Captain to see the check's list and nudge owners. People sign in with Red Hat SSO, and a Jira service account writes.
@@ -216,7 +216,7 @@ Total: 52 points.
 ### 8. jirasync writes the release-note fields
 
 - jirasync fills Release Note Text, Release Note Type and Git Pull Request, and sets Release Note Status to Awaiting Approval.
-- It never overwrites a ticket someone has already decided. When a ticket gets a second pull request, it appends the note and asks for approval again.
+- It never compares text. It keeps a Jira comment per pull request it has copied, and adds a new pull request's note as a new paragraph, see Implementation Details.
 - When the dashboard is switched off, it sets Proposed instead, so no ticket is stuck.
 - Each night it reports how many pull requests it linked and how many it skipped.
 
