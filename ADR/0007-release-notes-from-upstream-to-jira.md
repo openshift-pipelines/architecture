@@ -206,6 +206,8 @@ Total: 52 points.
 
 - Today jirasync looks for a second-level heading, while the Tekton pull request template uses a first-level one. So it misses the note the author wrote and drafts one with Gemini.
 - Read the Tekton release-note block. When the block says `NONE`, write nothing.
+- Add tektoncd/pipelines-as-code to `jirasync-repos.yaml`. It is not on the list today, though in 1.24.0 it had 46 of the 59 changes with no block.
+- The list names openshift-pipelines/tekton-kueue, while hack's release files use tektoncd/tekton-kueue. Point jirasync at the repository hack uses.
 
 ### 7. jirasync dry run over 1.25
 
