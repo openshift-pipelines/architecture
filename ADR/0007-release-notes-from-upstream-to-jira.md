@@ -178,32 +178,32 @@ Affected components are every upstream repository in the product, [openshift-pip
 
 `Optional`
 
-The work is 20 items under the epic [SRVKP-14410](https://redhat.atlassian.net/browse/SRVKP-14410). The 1.25 code freeze is at the end of November 2026. 1.25 gets the release-time check, and [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) reading the release-note block with its field writes in a dry run. 1.26 gets [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) writing to Jira, the CI checks, the RN Dashboard and the Slack app. Each item's Jira issue names its owner. Items 13 to 18 have no owner yet.
+The work is 20 items, 19 of them filed as issues under the epic [SRVKP-14410](https://redhat.atlassian.net/browse/SRVKP-14410). The 1.25 code freeze is at the end of November 2026. 1.25 gets the release-time check, and [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) reading the release-note block with its field writes in a dry run. 1.26 gets [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) writing to Jira, the CI checks, the RN Dashboard and the Slack app. Each item's Jira issue names its owner. Items 13 to 18 have no owner yet.
 
-| # | Type | Work | Points | Needs | Release |
-|---|---|---|---|---|---|
-| 1 | Task | Release Note Status value and the fix version automation | 1 | - | 1.25 |
-| 2 | Task | Required fields in the SRVKP workflow | 3 | - | 1.26 |
-| 3 | Task | Awaiting Approval on the docs dashboard | 1 | 1 | 1.26 |
-| 4 | Story | Move the audit tool into [one-click-release](https://github.com/openshift-pipelines/one-click-release) | 3 | - | 1.25 |
-| 5 | Story | Build the release-time check | 5 | 4 | 1.25 |
-| 6 | Task | Run the check at the 1.25 freeze | 3 | 5 | 1.25 |
-| 7 | Story | [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) reads the release-note block | 2 | - | 1.25 |
-| 8 | Story | [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) field writes, dry run over 1.25 | 5 | 7 | 1.25 |
-| 9 | Story | [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) writes the release-note fields | 3 | 1, 8 | 1.26 |
-| 10 | Story | CI check in warn mode for Pipelines as Code | 3 | - | 1.26 |
-| 11 | Story | CI check in warn mode for the other upstream repositories | 3 | 10 | 1.26 |
-| 12 | Story | CI check on downstream repositories | 2 | 10 | Optional |
-| 13 | Spike | RN Dashboard proof of concept | 5 | - | Start in 1.25 |
-| 14 | Story | RN Dashboard owner view | 5 | 9, 13 | 1.26 |
-| 15 | Story | RN Dashboard ticket create and link | 5 | 2, 5, 14 | 1.26 |
-| 16 | Story | RN Dashboard Release Captain view | 3 | 6, 14 | 1.26 |
-| 17 | Story | Slack app | 5 | 9, 13 | 1.26 |
-| 18 | Task | Deploy the RN Dashboard and the Slack app | 3 | 3, 15, 16, 17 | 1.26 |
-| 19 | Task | Switch the Pipelines as Code check from warn to fail | 1 | 10 | 1.27 |
-| 20 | Task | Update the Release Captain handbook and tell the docs team | 1 | 6 | 1.26 |
+| # | Jira | Type | Work | Points | Needs | Release |
+|---|---|---|---|---|---|---|
+| 1 | [SRVKP-15341](https://redhat.atlassian.net/browse/SRVKP-15341) | Task | Release Note Status value and the fix version automation | 2 | - | 1.25 |
+| 2 | [SRVKP-15343](https://redhat.atlassian.net/browse/SRVKP-15343) | Task | Required fields in the SRVKP workflow | 5 | - | 1.26 |
+| 3 | [SRVKP-15344](https://redhat.atlassian.net/browse/SRVKP-15344) | Task | Awaiting Approval on the docs dashboard | 1 | 1 | 1.26 |
+| 4 | [SRVKP-15345](https://redhat.atlassian.net/browse/SRVKP-15345) | Story | Move the audit tool into [one-click-release](https://github.com/openshift-pipelines/one-click-release) | 3 | - | 1.25 |
+| 5 | [SRVKP-15346](https://redhat.atlassian.net/browse/SRVKP-15346) | Story | Build the release-time check | 5 | 4 | 1.25 |
+| 6 | [SRVKP-15358](https://redhat.atlassian.net/browse/SRVKP-15358) | Task | Run the check at the 1.25 freeze | 3 | 5 | 1.25 |
+| 7 | [SRVKP-15359](https://redhat.atlassian.net/browse/SRVKP-15359) | Story | [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) reads the release-note block | 3 | - | 1.25 |
+| 8 | [SRVKP-15364](https://redhat.atlassian.net/browse/SRVKP-15364) | Story | [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) field writes, dry run over 1.25 | 5 | 7 | 1.25 |
+| 9 | [SRVKP-15365](https://redhat.atlassian.net/browse/SRVKP-15365) | Story | [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) writes the release-note fields | 3 | 1, 8 | 1.26 |
+| 10 | [SRVKP-15366](https://redhat.atlassian.net/browse/SRVKP-15366) | Story | CI check in warn mode for Pipelines as Code | 3 | - | 1.26 |
+| 11 | [SRVKP-15367](https://redhat.atlassian.net/browse/SRVKP-15367) | Story | CI check in warn mode for the other upstream repositories | 5 | 10 | 1.26 |
+| 12 | not filed | Story | CI check on downstream repositories | 2 | 10 | Optional |
+| 13 | [SRVKP-15368](https://redhat.atlassian.net/browse/SRVKP-15368) | Spike | RN Dashboard proof of concept | 5 | - | Start in 1.25 |
+| 14 | [SRVKP-15369](https://redhat.atlassian.net/browse/SRVKP-15369) | Story | RN Dashboard owner view | 5 | 9, 13 | 1.26 |
+| 15 | [SRVKP-15370](https://redhat.atlassian.net/browse/SRVKP-15370) | Story | RN Dashboard ticket create and link | 3 | 2, 5, 14 | 1.26 |
+| 16 | [SRVKP-15371](https://redhat.atlassian.net/browse/SRVKP-15371) | Story | RN Dashboard Release Captain view | 3 | 6, 14 | 1.26 |
+| 17 | [SRVKP-15372](https://redhat.atlassian.net/browse/SRVKP-15372) | Story | Slack app | 3 | 9, 13 | 1.26 |
+| 18 | [SRVKP-15373](https://redhat.atlassian.net/browse/SRVKP-15373) | Task | Deploy the RN Dashboard and the Slack app | 3 | 3, 15, 16, 17 | 1.26 |
+| 19 | [SRVKP-15374](https://redhat.atlassian.net/browse/SRVKP-15374) | Task | Switch the Pipelines as Code check from warn to fail | 2 | 10 | 1.27 |
+| 20 | [SRVKP-15375](https://redhat.atlassian.net/browse/SRVKP-15375) | Task | Update the Release Captain handbook and tell the docs team | 1 | 6 | 1.26 |
 
-Total: 62 points, 60 without the optional item 12. Items 4 to 8 are 18 points before the 1.25 freeze, with 4, 5 and 6 one after another. Item 6 has a fallback in case 4 or 5 slips.
+Total: 63 points over the 19 filed issues. The optional item 12 is not filed. Items 4 to 8 are 19 points before the 1.25 freeze, with 4, 5 and 6 one after another. Item 6 has a fallback in case 4 or 5 slips.
 
 ### 1. Release Note Status value and the fix version automation
 
@@ -490,7 +490,7 @@ The decision is considered accepted when:
 - [skipjira#30, skip transition for tickets in Release Pending](https://github.com/openshift-pipelines/skipjira/pull/30)
 - [openshift-pipelines/skipjira](https://github.com/openshift-pipelines/skipjira)
 - [OpenShift Pipelines release notes](https://docs.redhat.com/en/documentation/red_hat_openshift_pipelines/)
-- [JIRA SRVKP-14410, Upstream-first release notes for OpenShift Pipelines 1.25](https://redhat.atlassian.net/browse/SRVKP-14410)
+- [JIRA SRVKP-14410, Release notes from upstream pull requests to Jira](https://redhat.atlassian.net/browse/SRVKP-14410)
 - [JIRA SRVKP-14379, Release Captain handbook](https://redhat.atlassian.net/browse/SRVKP-14379)
 
 ## Change Log
