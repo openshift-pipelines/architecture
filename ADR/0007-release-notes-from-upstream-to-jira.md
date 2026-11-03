@@ -122,7 +122,7 @@ docs team
    The SRVKP ticket is Red Hat's own work. The owner of the change creates or links it and puts the pull request in its Git Pull Request field, so the link goes from the ticket to the pull request. The owner is the Red Hat engineer who wrote the change. For a change from outside Red Hat, it is the Red Hat owner of that component. They act when the release-time check lists the change as "no ticket", see step 4.
 2. **At merge.** [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync), in [openshift-pipelines/skipjira](https://github.com/openshift-pipelines/skipjira), looks for the ticket whose Git Pull Request field names each merged pull request. It never creates a ticket. When no ticket names the pull request, [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) does nothing at merge, and the release-time check lists the change as "no ticket", see step 4. [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) reads only pull requests by the people on its list of team members, so a change from outside Red Hat also reaches Jira through the check. [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) cannot read pull requests in private forks, which hold embargoed security fixes. The docs team confirmed these need no release note. They go in the advisory only.
 
-   Today [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) posts the note as a Jira comment, or a Gemini draft when the pull request has no block, [as on SRVKP-15008](https://redhat.atlassian.net/browse/SRVKP-15008?focusedCommentId=19128774), and a person copies it into the fields by hand. Under this ADR it writes the fields itself. When a ticket names the pull request, [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) copies the release-note block into Release Note Text, sets Release Note Type from the pull request's kind, and sets Release Note Status to Awaiting Approval. When a linked pull request has no block, [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) drafts the text with Gemini from the diff and writes the draft into Release Note Text the same way. Nothing reaches the docs dashboard until the owner approves it in the next step, so no Gemini draft is published unread. [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) already moves the ticket to Code Review when the pull request is ready for review, and to Dev Complete at merge. This ADR adds the field writes and no new transition.
+   Today [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) writes a note it finds in the pull request straight into the fields, with status Proposed. When the pull request has no block, it posts a Gemini draft as a Jira comment, [as on SRVKP-15008](https://redhat.atlassian.net/browse/SRVKP-15008?focusedCommentId=19128774), and a person copies it into the fields by hand. Under this ADR every note waits for the owner. When a ticket names the pull request, [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) copies the release-note block into Release Note Text, sets Release Note Type from the pull request's kind, and sets Release Note Status to Awaiting Approval. When a linked pull request has no block, [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) drafts the text with Gemini from the diff and writes the draft into Release Note Text the same way. Nothing reaches the docs dashboard until the owner approves it in the next step, so no Gemini draft is published unread. [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) already moves the ticket to Code Review when the pull request is ready for review, and to Dev Complete at merge. This ADR adds the field writes and no new transition.
 3. **At the RN Dashboard.** Every note waits for a person who knows the change. The owner opens the RN Dashboard, reads the note, edits it if needed, and approves or rejects it. Approval sets Release Note Status to Proposed, and the ticket reaches the docs dashboard. Rejection sets Release Note Type to Not Required and the status to Rejected. A bot account makes the change and adds a Jira comment such as "Approved by Jane Doe (jdoe@redhat.com) on the RN Dashboard, 2026-10-18 14:02 UTC".
 
    One change can span several pull requests or several stories under an epic, such as a feature that touches pipeline, operator and cli. When they share one ticket, the owner edits their notes into one before approving. When each has its own story, the owner approves one combined note on one story and rejects the note on the others, which sets their Release Note Type to Not Required. One change gets one note, so not every story needs its own. The check counts a change as ready when any ticket that names its pull request is ready. The RN Dashboard does not yet group related "no ticket" rows, so the owner has to notice that they belong together. Grouping them is left until the first release on this process shows how often it happens.
@@ -165,9 +165,9 @@ A ticket made by Create records work that has already merged, so it skips the ba
 
 `Required`
 
-- **Upstream repositories.** Add a release-note check to each repository that lacks one. Pipelines as Code, console-plugin, opc and the smaller openshift-pipelines repositories have no release-note block today. Pipelines as Code comes first: in 1.24.0 it had 46 of the 59 changes with no block.
-- **Downstream repositories.** Run the same check only on pull requests that people open, so bot pull requests keep flowing.
-- **[jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync).** [skipjira#30](https://github.com/openshift-pipelines/skipjira/pull/30) is merged. It stops [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) moving tickets back out of Release Pending, the bug that got it switched off. Next, [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) reads the Tekton release-note block, writes the fields instead of a comment and sets Awaiting Approval. [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) never compares the text on a ticket with the text in a pull request. It keeps its own record instead: each time it copies a note, it adds a Jira comment that names the pull request. When a ticket names a pull request that has no such comment yet, [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) adds that note as a new paragraph and leaves the existing text as it is. It then sets Awaiting Approval again, so the owner sees the addition. If the docs team has set Done, [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) only adds a comment and changes nothing else. It skips backport pull requests that bots open, because they carry the same note as the original. It never changes text a person has written or approved. A ticket whose Release Note Type is Not Required counts as decided. [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) changes none of its fields, and the ticket never enters the owner's queue. The Release Captain still sees it in the "not required" group of the check's list, so a wrong call can be caught.
+- **Upstream repositories.** Add a release-note check to each repository that lacks one. tektoncd/pipeline, cli, operator, triggers, results and tekton-kueue already run Prow's `release-note` plugin. Pipelines as Code, console-plugin, opc and the smaller openshift-pipelines repositories have no release-note block today. Pipelines as Code comes first: in 1.24.0 it had 46 of the 59 changes with no block.
+- **Downstream repositories.** Optional. Run the same check only on pull requests that people open, so bot pull requests keep flowing.
+- **[jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync).** [skipjira#30](https://github.com/openshift-pipelines/skipjira/pull/30) is merged. It stops [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) moving tickets back out of Release Pending, the bug that got it switched off. Next, [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) reads the Tekton release-note block, writes Gemini drafts into the fields instead of a comment, and sets Awaiting Approval instead of Proposed. Until that is built, it writes no release-note fields, so 1.25 runs it as a dry run. [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) never compares the text on a ticket with the text in a pull request. It keeps its own record instead: each time it copies a note, it adds a Jira comment that names the pull request. When a ticket names a pull request that has no such comment yet, [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) adds that note as a new paragraph and leaves the existing text as it is. It then sets Awaiting Approval again, so the owner sees the addition. If the docs team has set Done, [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) only adds a comment and changes nothing else. It skips backport pull requests that bots open, because they carry the same note as the original. It never changes text a person has written or approved. A ticket whose Release Note Type is Not Required counts as decided. [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) changes none of its fields, and the ticket never enters the owner's queue. The Release Captain still sees it in the "not required" group of the check's list, so a wrong call can be caught.
 - **Jira.** Expect the Git Pull Request field on every ticket except CVE, spike and docs tickets. Add Awaiting Approval to the Release Note Status field, and add it to the docs dashboard's "needs attention" gadget so writers still see these tickets. Change the automation that copies fix version into target version, because it runs the opposite way to the rule above.
 - **Release-time check.** Move the audit tool into openshift-pipelines. Add the range from the downstream tag to the snapshot, the verdicts and the list.
 - **RN Dashboard.** One internal page with two views, one for owners to approve or reject, one for the Release Captain to see the check's list and nudge owners. People sign in with Red Hat SSO, and a Jira service account writes.
@@ -178,145 +178,188 @@ Affected components are every upstream repository in the product, [openshift-pip
 
 `Optional`
 
-The work is 18 items under the epic [SRVKP-14410](https://redhat.atlassian.net/browse/SRVKP-14410). The 1.25 code freeze is at the end of November 2026. 1.25 gets the release-time check and a [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) dry run. 1.26 gets [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) writing to Jira, the CI checks, the RN Dashboard and the Slack app.
+The work is 20 items under the epic [SRVKP-14410](https://redhat.atlassian.net/browse/SRVKP-14410). The 1.25 code freeze is at the end of November 2026. 1.25 gets the release-time check, and [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) reading the release-note block with its field writes in a dry run. 1.26 gets [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) writing to Jira, the CI checks, the RN Dashboard and the Slack app. Each item's Jira issue names its owner. Items 13 to 18 have no owner yet.
 
 | # | Type | Work | Points | Needs | Release |
 |---|---|---|---|---|---|
-| 1 | Task | Agree the Release Note Status values with the docs team | 0 | - | 1.25 |
-| 2 | Task | Jira field, automation and gadget changes | 2 | 1 | 1.25 |
-| 3 | Story | Move the audit tool into [one-click-release](https://github.com/openshift-pipelines/one-click-release) | 3 | - | 1.25 |
-| 4 | Story | Build the release-time check | 3 | 3 | 1.25 |
-| 5 | Task | Run the check at the 1.25 freeze | 3 | 4 | 1.25 |
-| 6 | Story | [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) reads the release-note block | 2 | - | 1.25 |
-| 7 | Story | [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) dry run over 1.25 | 3 | 6 | 1.25 |
-| 8 | Story | [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) writes the release-note fields | 3 | 2, 7 | 1.26 |
-| 9 | Story | CI check in warn mode for Pipelines as Code | 3 | - | 1.25 if time allows, else 1.26 |
-| 10 | Story | CI check in warn mode for the other upstream repositories | 3 | 9 | 1.26 |
-| 11 | Story | CI check on downstream repositories | 2 | 9 | 1.26 |
-| 12 | Spike | RN Dashboard proof of concept | 5 | - | Start in 1.25, finish in 1.26 |
-| 13 | Story | RN Dashboard owner view | 5 | 8, 12 | 1.26 |
-| 14 | Story | RN Dashboard ticket create and link | 3 | 13 | 1.26 |
-| 15 | Story | RN Dashboard Release Captain view | 3 | 5, 13 | 1.26 |
-| 16 | Story | Slack app | 5 | 8, 12 | 1.26 |
-| 17 | Task | Deploy the RN Dashboard and the Slack app | 3 | 14, 15, 16 | 1.26 |
-| 18 | Task | Switch the CI checks from warn to fail | 1 | 9, 10 | 1.26 or 1.27 |
+| 1 | Task | Release Note Status value and the fix version automation | 1 | - | 1.25 |
+| 2 | Task | Required fields in the SRVKP workflow | 3 | - | 1.26 |
+| 3 | Task | Awaiting Approval on the docs dashboard | 1 | 1 | 1.26 |
+| 4 | Story | Move the audit tool into [one-click-release](https://github.com/openshift-pipelines/one-click-release) | 3 | - | 1.25 |
+| 5 | Story | Build the release-time check | 5 | 4 | 1.25 |
+| 6 | Task | Run the check at the 1.25 freeze | 3 | 5 | 1.25 |
+| 7 | Story | [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) reads the release-note block | 2 | - | 1.25 |
+| 8 | Story | [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) field writes, dry run over 1.25 | 5 | 7 | 1.25 |
+| 9 | Story | [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) writes the release-note fields | 3 | 1, 8 | 1.26 |
+| 10 | Story | CI check in warn mode for Pipelines as Code | 3 | - | 1.26 |
+| 11 | Story | CI check in warn mode for the other upstream repositories | 3 | 10 | 1.26 |
+| 12 | Story | CI check on downstream repositories | 2 | 10 | Optional |
+| 13 | Spike | RN Dashboard proof of concept | 5 | - | Start in 1.25 |
+| 14 | Story | RN Dashboard owner view | 5 | 9, 13 | 1.26 |
+| 15 | Story | RN Dashboard ticket create and link | 5 | 2, 5, 14 | 1.26 |
+| 16 | Story | RN Dashboard Release Captain view | 3 | 6, 14 | 1.26 |
+| 17 | Story | Slack app | 5 | 9, 13 | 1.26 |
+| 18 | Task | Deploy the RN Dashboard and the Slack app | 3 | 3, 15, 16, 17 | 1.26 |
+| 19 | Task | Switch the Pipelines as Code check from warn to fail | 1 | 10 | 1.27 |
+| 20 | Task | Update the Release Captain handbook and tell the docs team | 1 | 6 | 1.26 |
 
-Total: 52 points.
+Total: 62 points, 60 without the optional item 12. Items 4 to 8 are 18 points before the 1.25 freeze, with 4, 5 and 6 one after another. Item 6 has a fallback in case 4 or 5 slips.
 
-### 1. Agree the Release Note Status values with the docs team
+### 1. Release Note Status value and the fix version automation
 
-- 12 SRVKP tickets already use Release Note Status Rejected. Ask the docs team what it means to them.
-- If it means what this ADR needs, a rejection uses it. If not, a rejection sets only Release Note Type Not Required.
-- Agree the new value Awaiting Approval, and that the owner's approval moves it to Proposed.
-
-### 2. Jira field, automation and gadget changes
-
-- An SRVKP admin adds Awaiting Approval to the Release Note Status field.
+- An SRVKP admin adds Awaiting Approval to the Release Note Status field. The field has Proposed, In Progress, Rejected, Upstream Only, Text Approved and Done today.
+- The docs team confirms the new value. Kavya Verma confirmed on 2026-10-26 that Rejected means no release note is needed, as this ADR uses it, and that approval needs engineering and docs both.
 - An SRVKP admin changes the automation that copies fix version into target version. Developers set target version and the Release Captain sets fix version, so the copy runs the wrong way.
-- An SRVKP admin makes Git Pull Request required when a ticket moves to Code Review, and Release Note Type required when it moves to Release Pending. [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) moves a ticket to Code Review when its pull request is ready for review, before any note exists, so Type cannot be asked there. Not Required is a valid answer, so a change that needs no note costs one click. Jan Richtar is testing a workflow on stage Jira that already requires Git Pull Request at Code Review, and this goes into the same change. Open with Jan: which issue types the rule covers. Vulnerability tickets carry a dependency pull request, about 300 a release, so their Type should be set to Not Required by automation, not by hand.
-- The docs team adds Awaiting Approval to the "needs attention" gadget on the docs dashboard, so writers still see these tickets.
-- Done when all four changes are live.
+- Done when both changes are live.
 
-### 3. Move the audit tool into one-click-release
+### 2. Required fields in the SRVKP workflow
+
+- Jan Richtar and an SRVKP admin make Git Pull Request required when a ticket moves to Code Review, and Release Note Type required when it moves to Release Pending. Not Required is a valid answer, so a change that needs no note costs one click.
+- Type cannot be asked at Code Review. [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) moves a ticket there when its pull request is ready for review, before any note exists.
+- This goes into the workflow Jan is testing on stage Jira, which already requires Git Pull Request at Code Review. Open with Jan: which issue types the rule covers.
+- Before the rule goes live:
+  - Automation sets Release Note Type Not Required on Vulnerability tickets. They carry a dependency pull request, about 300 a release.
+  - The Release Captain's bulk move to Release Pending is tested on stage Jira. In 1.24.0, 66 tickets reached Release Pending or Closed with Type empty, and the rule would stop every one of them.
+- Done when the rule is live on SRVKP and a release's bulk move passes.
+
+### 3. Awaiting Approval on the docs dashboard
+
+- The docs team adds Awaiting Approval to the "needs attention" gadget on the docs dashboard, so writers still see these tickets. Today the gadget selects an empty Release Note Status, and the "ready" gadget selects Proposed or Done, so a ticket at Awaiting Approval matches neither.
+- Done before item 18 turns on Awaiting Approval.
+
+### 4. Move the audit tool into one-click-release
 
 - The audit tool, [`cmd/audit`](https://github.com/theakshaypant/osp-rc-tools/blob/main/cmd/audit/main.go) in [theakshaypant/osp-rc-tools](https://github.com/theakshaypant/osp-rc-tools), lists the upstream changes in a release.
-- Move it into [openshift-pipelines/one-click-release](https://github.com/openshift-pipelines/one-click-release) so the team owns it and the check builds on it.
+- Move it into [openshift-pipelines/one-click-release](https://github.com/openshift-pipelines/one-click-release) so the team owns it and the check builds on it. one-click-release has no Go code today, so the move brings the Go module, its GitHub and Jira packages, and a CI job.
+- Move the saved GitHub and Jira data of the 1.24.0 freeze replay with it, so the check's regression test runs in the team's repository.
 
-### 4. Build the release-time check
+### 5. Build the release-time check
 
-- The range runs from the previous release's downstream tag to the core snapshot of the new one.
-- Each change gets one verdict from the table in the Decision section. The changes that need action come first.
+- The range runs from the previous release's downstream tag to the core snapshot of the new one. Reading the snapshot needs a Konflux token for kflux-prd-rh02.
+- Leave out pull requests opened by bots, from a list of bot accounts kept beside the check. Today the tool skips only `dependabot[bot]`. Count a backport once, through the original pull request.
+- Find each pull request's ticket through the Git Pull Request field, and through an SRVKP key in the title, as console-plugin pull requests carry one.
+- Each change gets one verdict from this table. The changes that need action come first.
+
+  | Verdict | Meaning |
+  |---|---|
+  | no ticket | The change needs a note and has no SRVKP ticket |
+  | fields missing | The ticket exists, but a release-note field or target version is empty |
+  | awaiting approval | The note is on the ticket, but nobody has approved or rejected it |
+  | ready | Every field is set and the ticket is on the docs dashboard |
+  | not required | Release Note Type is Not Required, or the pull request is on the release's no-note list |
+  | CVE | A security fix, for the advisory only |
+  | other release | It shipped in an earlier release |
+
+- A change is ready when any ticket that names its pull request is ready.
+- Define the format of the release's no-note list, a file in one-click-release, and read it. Item 15 writes it.
+- Write the list as JSON for the Release Captain's view, and as a Markdown report the Release Captain can read without the RN Dashboard.
 - Unit tests run on saved GitHub and Jira responses. The 1.24.0 freeze replay is a regression test.
 
-### 5. Run the check at the 1.25 freeze
+### 6. Run the check at the 1.25 freeze
 
-- Run the check as a GitHub Actions workflow in openshift-pipelines, with the Jira and GitHub tokens as repository secrets.
-- Give the list to the 1.25 Release Captain at the freeze.
+- Run the check as a GitHub Actions workflow in openshift-pipelines. The Jira, GitHub and Konflux tokens are repository secrets.
+- Give the report to the 1.25 Release Captain at the freeze.
+- If item 4 or 5 is not ready by the freeze, run `cmd/audit` from osp-rc-tools as it is, which already lists a minor release's tickets with no note, and give that list instead.
 - Take the counts per verdict to the 1.25 retrospective.
 - Decide whether the check runs once at the freeze or every week through the cycle.
 
-### 6. jirasync reads the release-note block
+### 7. jirasync reads the release-note block
 
 - Today [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) looks for a second-level heading, while the Tekton pull request template uses a first-level one. So it misses the note the author wrote and drafts one with Gemini.
 - Read the Tekton release-note block. When the block says `NONE`, write nothing.
 - Add tektoncd/pipelines-as-code to [`jirasync-repos.yaml`](https://github.com/openshift-pipelines/skipjira/blob/main/jirasync-repos.yaml). It is not on the list today, though in 1.24.0 it had 46 of the 59 changes with no block.
 - The list names openshift-pipelines/tekton-kueue, while hack's release files use tektoncd/tekton-kueue. Point [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) at the repository hack uses.
+- [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) already writes a note it finds into the fields, with status Proposed. Once it reads the Tekton block, it would do that on every Tekton ticket. Remove the release-note field secrets from its nightly workflow before this merges, so 1.25 writes no fields. Item 9 adds them back.
 
-### 7. jirasync dry run over 1.25
+### 8. jirasync field writes, dry run over 1.25
 
-- Run [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) once over every pull request merged in the 1.25 range, writing nothing to Jira.
-- Record what it would write on each ticket.
+- Build the field writes this ADR describes: Release Note Text from the author's block or a Gemini draft, Release Note Type from the pull request's kind, and Release Note Status Awaiting Approval. Add the Jira comment per copied pull request, the new-paragraph rule, the guard for Done, Not Required counted as decided, and skipping backports that bots open. See Implementation Details.
+- Add a dry-run mode that records what it would write on each ticket and writes nothing. The workflow's `dry_run` input today runs a test command that does not cover release notes.
+- Run it over every pull request merged in the 1.25 range.
 - At the freeze, compare that with what people wrote, and fix what it gets wrong.
 
-### 8. jirasync writes the release-note fields
+### 9. jirasync writes the release-note fields
 
-- [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) fills Release Note Text, Release Note Type and Git Pull Request, and sets Release Note Status to Awaiting Approval.
-- It never compares text. It keeps a Jira comment per pull request it has copied, and adds a new pull request's note as a new paragraph, see Implementation Details.
-- When the RN Dashboard is switched off, it sets Proposed only for a note the pull request's author wrote. A Gemini draft stays a comment, as today, so no draft reaches the docs team unread.
+- Turn the writes on, with the field secrets back in the workflow.
+- When the RN Dashboard is switched off, it sets Proposed only for a note the pull request's author wrote. A Gemini draft stays a comment, as today, so no draft reaches the docs team unread. Item 18 switches to Awaiting Approval.
 - Each night it reports how many pull requests it linked and how many it skipped.
 
-### 9. CI check in warn mode for Pipelines as Code
+### 10. CI check in warn mode for Pipelines as Code
 
 - Add a check that warns when a pull request has no release-note block.
 - Pipelines as Code comes first. In 1.24.0 it had 46 of the 59 changes with no block.
 - The Pipelines as Code maintainers have to agree to the check.
 
-### 10. CI check in warn mode for the other upstream repositories
+### 11. CI check in warn mode for the other upstream repositories
 
-- Add the same check to console-plugin, opc, tekton-kueue and the smaller openshift-pipelines repositories.
+- tektoncd/pipeline, cli, operator, triggers, results and tekton-kueue already run Prow's `release-note` plugin, so they need nothing.
+- Add the check to chains, console-plugin, opc, git-init, manual-approval-gate, hub, pruner, multicluster-proxy-aae, syncer-service, tekton-assist and tekton-caches, where it is missing.
 - Each repository's maintainers have to agree to the check.
 
-### 11. CI check on downstream repositories
+### 12. CI check on downstream repositories
 
-- Run the same check on downstream repositories, only on pull requests that people open.
-- Bot pull requests keep flowing without it.
+- Optional. Run the same check on downstream repositories, only on pull requests that people open.
+- Since 2026-07-01, the 12 pull requests people opened downstream touched only `.konflux/` build files, so nearly every block would say `NONE`. Do it only if that changes.
 
-### 12. RN Dashboard proof of concept
+### 13. RN Dashboard proof of concept
 
-- Answer the four questions under Testability against a sandbox Jira project and a test Slack app.
+- Timeboxed to three weeks from the day it starts.
+- Answer the four questions against a sandbox Jira project and a test Slack app:
+  - A Red Hat SSO login maps to the right Jira account, so the comment names the right person.
+  - A Jira service account can set Release Note Status and Type and add a comment on any SRVKP ticket.
+  - Red Hat's Slack admins approve an app with `chat:write`, and the lookup from a Jira email to a Slack user works for direct messages.
+  - How many approvals one release asks of each team. The 1.24.0 numbers suggest about 15.
 - Decide where the RN Dashboard and the Slack app run, and who runs them.
 - The requests for the SSO client, the Jira service account and the Slack app go out in the first week, since they take the longest.
 
-### 13. RN Dashboard owner view
+### 14. RN Dashboard owner view
 
 - People sign in with Red Hat SSO.
-- An owner sees the tickets waiting for them, reads each note, edits it if needed, and approves or rejects it. When a ticket holds notes from several pull requests, the owner edits them into one before approving. Another engineer on the same component can decide too, for example when the owner is away.
+- An owner sees the tickets waiting for them, reads each note, edits it if needed, sets Release Note Type, including Technology Preview, and approves or rejects it. When a ticket holds notes from several pull requests, the owner edits them into one before approving.
+- Another engineer on the same component can decide too, for example when the owner is away. The component's engineers come from the team's list of GitHub ids, with a component column.
+- Filters for my tickets and my component.
+- Before it writes, it checks that the status and the text have not changed since the page loaded. If they have, it reloads instead of writing.
 - A Jira service account makes the change and adds a comment that names who decided.
 
-### 14. RN Dashboard ticket create and link
+### 15. RN Dashboard ticket create and link
 
-- For a change with no ticket, create opens a new SRVKP ticket with Git Pull Request, Release Note Text and Release Note Type filled from the pull request. The ticket is a Story under the release's "Upstream release notes" epic, with the pull request's title as summary, the component mapped from the repository, the owner as assignee and the release as target version. The bot moves it straight to Release Pending, so it never enters the backlog.
+- For a change with no ticket, create opens a new SRVKP ticket with Git Pull Request, Release Note Text and Release Note Type filled from the pull request. The ticket is a Story under the release's "Upstream release notes" epic, with the pull request's title as summary, the component mapped from the repository, the owner as assignee and the release as target version. The bot moves it straight to Release Pending, filling each field the workflow asks for, so it never enters the backlog.
 - Link takes an existing ticket key and fills its Git Pull Request field.
-- No note needed adds the pull request to the release's no-note list in one-click-release. No ticket is created.
-- Filters for my tickets and my component.
+- No note needed creates no ticket. The bot commits the pull request's URL, who decided and when to the release's no-note list in one-click-release, in the format item 5 defines.
 
-### 15. RN Dashboard Release Captain view
+### 16. RN Dashboard Release Captain view
 
-- The check's list for the release, grouped by verdict.
+- The check's list for the release, grouped by verdict, read from the JSON item 5 writes.
 - Who has to act on each change, and how long each ticket has waited.
 - It has no approve or reject button. The Release Captain chases owners and does not decide for them.
 
-### 16. Slack app
+### 17. Slack app
 
 - A daily summary of the waiting tickets in each team's channel.
 - A direct message to the owner when a ticket has waited 3 days.
 - It looks up Slack users by email. If that is blocked, it uses a Slack column in the team's list of GitHub ids. If neither works, it posts to team channels only.
 
-### 17. Deploy the RN Dashboard and the Slack app
+### 18. Deploy the RN Dashboard and the Slack app
 
-- Deploy both where item 12 decided.
-- Turn on [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync)'s Awaiting Approval mode at the same time, so owners have somewhere to approve.
+- Deploy both where item 13 decided.
+- Turn on [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync)'s Awaiting Approval mode at the same time, so owners have somewhere to approve. From then on a Gemini draft goes into Release Note Text, not a comment.
 
-### 18. Switch the CI checks from warn to fail
+### 19. Switch the Pipelines as Code check from warn to fail
 
-- A repository's check warns for one release, then fails pull requests from the next.
-- The epic closes when Pipelines as Code fails pull requests. Later switches are filed outside the epic.
+- The check warns for one release, then fails pull requests from the next.
+- The epic closes when Pipelines as Code fails pull requests. Switches in other repositories are filed outside the epic.
+
+### 20. Update the Release Captain handbook and tell the docs team
+
+- Add to the Release Captain handbook, [SRVKP-14379](https://redhat.atlassian.net/browse/SRVKP-14379): create the release's "Upstream release notes" epic when the release starts, run the check, and work from its list.
+- Tell the docs team that every note now reaches them through a ticket, and that the per-component collection of upstream notes near the end of a release stops.
 
 ## Security & Compliance
 
 `Optional`
 
-- [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) and the release-time check need a Jira token that can write to SRVKP and a GitHub token that can read. Both run in GitHub Actions under openshift-pipelines, with the tokens stored as repository secrets.
+- [jirasync](https://github.com/openshift-pipelines/skipjira/tree/main/cmd/jirasync) and the release-time check need a Jira token that can write to SRVKP and a GitHub token that can read. The check also needs a Konflux token that can read Snapshots on kflux-prd-rh02. Both run in GitHub Actions under openshift-pipelines, with the tokens stored as repository secrets.
+- The RN Dashboard's bot needs a GitHub token that can write to one-click-release, to commit the release's no-note list.
 - The RN Dashboard's Jira service account can write the release-note fields on any SRVKP ticket. It only acts for a person signed in with Red Hat SSO, and every write carries a comment that names that person.
 - The Slack app's token can post to channels and send direct messages. It reads no messages.
 - CVE numbers never go in the release notes. CVE tickets stay on the advisory path.
@@ -427,7 +470,6 @@ The decision is considered accepted when:
 - Follow-up:
   - Decide whether the check runs once at freeze or every week through the cycle.
   - After two releases, decide from the approval numbers whether notes the author wrote in the pull request still need approval, or only the notes Gemini drafted.
-  - Ask the docs team what Release Note Status Rejected means to them today, before a rejection uses it.
 
 ## Dependencies
 
