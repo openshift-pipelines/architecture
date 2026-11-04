@@ -48,11 +48,11 @@ The choice affects TaskRun naming, audit trails, controller complexity, and how 
 
 ## Decision
 
-**Partial PipelineRun retry will be implemented by creating a new `PipelineRun` object for each retry attempt, linked to the original via metadata annotations.**
+**Partial PipelineRun retry will be implemented by creating a new `PipelineRun` object for each retry attempt, linked to its source via metadata annotations.**
 
-The original PipelineRun remains unchanged as an immutable audit record. The retry PipelineRun receives a new UID and owns new TaskRuns. Lineage is preserved through annotations (e.g., `tekton.dev/retryOf: <original-uid>`).
+The original PipelineRun remains unchanged as an immutable audit record. The retry PipelineRun receives a new UID and owns new TaskRuns. Lineage is preserved through annotations identifying the immediate parent PipelineRun (e.g., `tekton.dev/retryOf: <parent-name>` and `tekton.dev/retryOfUID: <parent-uid>`).
 
-This architectural decision establishes the foundation for retry semantics. Implementation details—including which Tasks re-run, how Results are forwarded, how workspaces are handled, whether planning occurs in the controller or clients, and how state is injected—are deferred to the Tekton Enhancement Proposal (TEP) process.
+This architectural decision establishes the foundation for retry semantics. Clients create the retry PipelineRun; the controller owns planning and validation before scheduling TaskRuns. Details are in TEP-0194.
 
 ## Consequences
 
@@ -61,32 +61,25 @@ This architectural decision establishes the foundation for retry semantics. Impl
 - **Preserves immutability:** Original PipelineRun stays terminal; no rewriting of status, timestamps, or audit history
 - **Avoids naming conflicts:** New PipelineRun generates new TaskRun names automatically
 - **Simpler reconciler semantics:** Retry is "create new object," not "mutate existing object"
-- **Clear lineage:** Users and UIs can track original → retry relationship via annotations
+- **Clear lineage:** Users and UIs can track source → retry relationships via annotations
 - **Aligns with Kubernetes patterns:** Declarative model (apply new spec) rather than imperative mutation
 
 ### Drawbacks
 
 - **Multiple objects per retry chain:** Original + retry + retry-of-retry creates several PipelineRuns (not a single mutable run)
 - **Requires linkage metadata:** UIs need to understand annotations to group related runs
-- **Implementation complexity deferred:** The architectural decision does not solve:
-  - Which Tasks to re-run (failed subgraph definition)
-  - How to forward Results from succeeded Tasks
-  - How to validate workspace/PVC availability
-  - Where retry planning logic lives (controller vs. clients)
-  - How the new PipelineRun recognizes succeeded Tasks
-  - How to pin remote resolver references
-  - How to handle nested PipelineRuns, matrices, `finally` tasks, `onError: continue`
+- **Implementation details:** Retry semantics and implementation choices are specified in TEP-0194 (see TEP Coverage)
 - **Does not address pruning:** If original TaskRuns/PipelineRuns are garbage collected, retry may need external storage (e.g., Tekton Results)
 
-### Follow-up Actions
+### TEP Coverage
 
-The TEP must define:
+TEP-0194 defines these details:
 
 1. **Retry scope semantics:** Which Tasks re-run (failed, blocked, dependent, matrix combinations, `finally` tasks)
 2. **Result forwarding mechanism:** How succeeded Task Results are made available to the retry
 3. **Workspace handling:** Validation rules for PVC availability; behavior when workspaces are unavailable
-4. **Planning boundary:** Whether controller/API calculates retry plan, or clients do
-5. **State injection:** How the new PipelineRun knows which Tasks to skip
+4. **Planning boundary:** Where authoritative retry planning occurs
+5. **Preserved task representation:** How preserved tasks and their Results are represented without synthetic TaskRuns
 6. **Definition stability:** How to ensure retry uses original Task/Pipeline definitions (not new resolves)
 7. **Safety guardrails:** Warnings for side effects, non-idempotent Tasks
 8. **Nested pipeline semantics:** Retry boundaries for Pipeline-in-Pipeline
