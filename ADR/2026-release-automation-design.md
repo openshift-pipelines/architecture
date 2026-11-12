@@ -1,4 +1,4 @@
-# 0002. "Hack" Release Automation Design
+# "Hack" Release Automation Design
 
 Date: 2026-04-24
 
