@@ -1,4 +1,4 @@
-# 1. Adopt Architecture Decision Records
+# Adopt Architecture Decision Records
 
 Date: 2026-02-09
 

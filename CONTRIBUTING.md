@@ -33,10 +33,11 @@ You can draft your ADR manually or use your AI agent (which automatically reads 
 
 **Option B: Manual copy**
 ```bash
-cp ADR/0000-adr-template.md ADR/00XX-my-decision.md
+cp ADR/0000-adr-template.md ADR/YYYY-my-decision.md
+# e.g., ADR/2026-my-decision.md
 ```
 
-Use the next available number. Fill in all sections.
+Name the file using the current year and a concise slug: `ADR/YYYY-<slug>.md`. No sequential numbering is required, avoiding number collisions across parallel pull requests. Fill in all sections.
 
 ### 2. Open a Pull Request
 
