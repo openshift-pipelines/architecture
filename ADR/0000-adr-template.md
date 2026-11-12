@@ -1,5 +1,5 @@
 ---
-id: ADR-XXXX
+id: YYYY-<slug>
 title: Title of the Decision
 date: 2026-10-01
 status: proposed
@@ -21,7 +21,7 @@ tags:
 -->
 ---
 
-# ADR-XXXX: [Title of the Decision]
+# [Title of the Decision]
 
 ## Context
 
@@ -191,7 +191,7 @@ Key factors influencing this decision:
 
 *Define all the references, docs, JIRAs, ADRs, etc. here.*
 
-- [ADR-0000: Referenced ADR](./0000-adr-template.md)
+- [YYYY-<referenced-slug>: Referenced ADR](./YYYY-<referenced-slug>.md)
 - [Performance improvement strategies](https://example.com/docs/sample)
 - [JIRA: High level outcome](https://redhat.atlassian.net/browse/SRVKP)
 - [Any other references](https://example.com/docs/sample)

@@ -50,9 +50,9 @@ Read `ADR/0000-adr-template.md` first to identify all required and optional sect
 
 Once alignment is reached, generate the ADR adhering to the repository's template:
 
-- **Location**: `ADR/00XX-<short-slug>.md` (next sequential number after checking existing ADRs in `ADR/`).
+- **Location**: `ADR/YYYY-<short-slug>.md` (e.g., `ADR/2026-<short-slug>.md` using the current year and a concise kebab-case slug; no sequential numbers are used).
 - **Template Compliance**: Read `ADR/0000-adr-template.md` directly as the single source of truth for document structure. Fill in all required sections as defined in the template, and include any applicable optional sections based on the grilling phase.
-- **Metadata**: Populate all metadata fields specified in the template.
+- **Metadata**: Populate all metadata fields specified in the template, setting `id: YYYY-<short-slug>`.
 
 ---
 
