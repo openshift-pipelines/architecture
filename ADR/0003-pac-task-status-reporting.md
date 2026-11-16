@@ -1,8 +1,8 @@
 ---
-id: ADR-0006
+id: ADR-0003
 title: "Pipelines as Code: Status Reporting Beyond Success/Failure"
 date: 2026-10-12
-status: proposed
+status: rejected
 authors:
   - "@theakshaypant"
 reviewers:
@@ -15,7 +15,15 @@ tags:
   - "pipelines-as-code"
 ---
 
-# ADR-0006: Pipelines as Code: Status Reporting Beyond Success/Failure
+# ADR-0003: Pipelines as Code: Status Reporting Beyond Success/Failure
+
+## Rejection
+
+**Status changed to rejected on 2026-11-16** following the [ADR review discussion](https://github.com/openshift-pipelines/architecture/pull/10#pullrequestreview-5915816579).
+
+Implementing this design would cause inconsistent status display for pipelines and tasks across VCS and cluster: a task could be reported as `failure` on the VCS check while `tkn`, the Tekton Dashboard, or `oc get` show the same TaskRun as `Succeeded`. The reviewers' consensus was to not go ahead with this implementation; the same has been updated on the Jira.
+
+The alternative discussed in the review — introducing a `neutral` status in Tekton core — would let all downstream components report the same status irrespective of the client used. That approach is outside the scope of this ADR and will be taken up in a separate design doc, in coordination with @waveywaves.
 
 ## Context
 
@@ -212,7 +220,7 @@ Tekton succeeds. CEL receives `{"lint": ["success"], "cve-scan": ["neutral"], "d
 
 Example PR: [theakshaypant/akshay-pac-test-repo#89](https://github.com/theakshaypant/akshay-pac-test-repo/pull/89)
 
-![Check run showing the neutral conclusion, overall summary message, per-task table rows, and the Dockerfile:12 inline annotation](./assets/0006/pac-cel-results.png)
+![Check run showing the neutral conclusion, overall summary message, per-task table rows, and the Dockerfile:12 inline annotation](./assets/0003/pac-cel-results.png)
 
 ##### Finally task
 
@@ -284,7 +292,7 @@ A Task result alone does not populate PipelineRun results. If the scan does not 
 
 Example PR: [theakshaypant/akshay-pac-test-repo#90](https://github.com/theakshaypant/akshay-pac-test-repo/pull/90)
 
-![Check run showing the neutral conclusion and overall summary message sourced from the finally.summarize task's PipelineRun result](./assets/0006/pac-finally-results.png)
+![Check run showing the neutral conclusion and overall summary message sourced from the finally.summarize task's PipelineRun result](./assets/0003/pac-finally-results.png)
 
 #### Implementation Guidance
 
@@ -517,3 +525,4 @@ Key factors influencing this decision:
 | Date | Author | Change Summary |
 | ---- | ------ | -------------- |
 | 2026-10-12 | @theakshaypant | Initial ADR |
+| 2026-11-16 | @theakshaypant | Status changed to rejected: design would cause inconsistent status display across VCS and cluster; alternate approach (neutral status in Tekton core) to be designed separately |
