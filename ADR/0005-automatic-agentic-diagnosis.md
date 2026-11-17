@@ -1,6 +1,6 @@
 ---
 id: ADR-0005
-title: Automatic Agentic Diagnosis for Failed PipelineRuns
+title: Agentic Diagnosis for Failed PipelineRuns
 date: 2026-09-02
 status: proposed
 authors:
@@ -12,36 +12,43 @@ tags:
   - agentic-diagnosis
 ---
 
-# ADR-0005: Automatic Agentic Diagnosis for Failed PipelineRuns
+# ADR-0005: Agentic Diagnosis for Failed PipelineRuns
 
 ## Context
 
-OpenShift Pipelines users diagnose failed `PipelineRun`s by correlating Tekton status, events, Pod status, and logs. Automatic diagnosis could reduce that work for enrolled teams, but also consumes model capacity and can send workload data to a configured provider. Whether this justifies a separately supported producer remains a product and engineering decision.
+OpenShift Pipelines users working in the console need to understand failed `PipelineRun`s. Existing Lightspeed chat with Tekton MCP tools is the baseline: a user can already ask for an investigation. Another entry point is useful only if it makes that journey easier, for example by preserving the selected workload context and exposing an asynchronous analysis that the user can return to.
 
-The [Lightspeed Agentic Operator](https://github.com/openshift/lightspeed-agentic-operator) manages agent workflows, sandbox lifecycle, approvals, and results. An `AgenticRun` is its namespaced custom resource describing a request and the agents used for workflow steps. Analysis is required; execution and verification are optional. An analysis-only run omits those latter steps. The operator manages submitted runs; discovery of failed Tekton workloads belongs to a domain-specific producer.
+The [Lightspeed Agentic Operator](https://github.com/openshift/lightspeed-agentic-operator) manages agent workflows, sandbox lifecycle, approvals, and results. An `AgenticRun` is its namespaced custom resource describing a request and the agents used for workflow steps. Analysis is required; execution and verification are optional. An analysis-only run omits those latter steps. This is the existing Lightspeed API, not a new Pipelines-owned agent abstraction.
 
-Three invocation paths must remain distinct: explicit AgentTask invocation, a user action from the console, and automatic failure discovery. A successful invocation prototype does not establish automatic triggering or released-product readiness. Pipelines-as-Code (PaC) already has a separately tracked follow-up investigation design for repository workloads; this proposal must justify any additional producer rather than replace that work.
+Agentic diagnosis covers both console-initiated and automatically initiated analysis. The design discussion favored first refining the console experience with UI owners. Asynchronous analysis after a user action and automatic discovery of failures are different decisions. A background watcher is not required for the former. AgentTask is not required for either direct submission to Lightspeed. Existing invocation prototypes are evidence to reuse, not proof of a supported console integration.
+
+Pipelines-as-Code (PaC) and Paco serve the developer's repository and pull-request workflow, including provider reporting. This proposal targets console users investigating workloads on the platform. Requiring PaC/Paco to manage AgenticRun submission, completion, and reports would add integration work without an agreed consumer benefit. Reuse is optional, not a prerequisite.
 
 ## Decision
 
-Propose a standalone, Pipelines-owned controller for opt-in, analysis-only diagnosis of failed and timed-out PipelineRuns not already handled by an enrolled investigation flow. Prefer this over changing core Tekton controllers or using the console as a background watcher. Implementation is conditional on agreement about the use case, ownership, overlapping producers, and the acceptance gates below.
+Use the existing Lightspeed AgenticRun API and Tekton MCP capabilities as the analysis-only contract for agentic diagnosis, whether initiated from the console or by a future automatic producer. First agree the console invocation, status, result, and presentation contract with UI and Lightspeed owners and demonstrate its value over existing chat. Keep automatic failure discovery as a separate follow-up decision rather than commit to a new controller now.
 
 ### Architectural Overview
 
-The producer observes eligible terminal PipelineRuns and submits a source-linked AgenticRun in the source namespace. The Agentic Operator owns analysis execution and result lifecycle; the producer owns failure classification, enrollment, source identity, deduplication, and delivery status. Neither the model nor the producer performs workload remediation.
+The candidate flow is:
 
-Cluster administrators authorize the feature and approved providers; namespace administrators enroll their namespaces within that policy. A source-level opt-out takes precedence. Namespace enrollment must not grant access to an unapproved provider or permit a namespace user to widen cluster policy.
+1. An authorized user selects a failed PipelineRun in the Pipelines console and requests diagnosis.
+2. The agreed console integration submits or reuses an equivalent analysis-only AgenticRun, bound to the source cluster, namespace, name, and UID.
+3. The Agentic Operator manages the analysis independently of the browser session. Its sandbox uses the configured model and authorized Tekton MCP tools to retrieve bounded evidence.
+4. The console observes workflow status, retrieves the authorized analysis result, and presents it or navigates to the agreed shared detail view. Reopening the page does not itself start another analysis.
 
-The producer passes namespace, name, UID, and bounded intent, not copied logs or credentials. Authorized tools retrieve bounded evidence. The result consumer is the authorized investigator through an agreed AgenticRun result/detail surface; console navigation is a separate integration decision, not a prerequisite for a background producer.
+No new controller or intermediary API is selected for this first journey. The owners must choose the smallest supported console-to-Lightspeed integration path; a new backend service is not assumed. The console handles user interaction, while Lightspeed owns the submitted workflow and result lifecycle. Neither performs workload remediation as part of this proposal.
+
+A future automatic producer could submit the same diagnosis contract without a user click. Its failure selection, enrollment, durable deduplication, and admission/cost controls need a separate decision; asynchronous AgenticRun execution alone does not supply automatic discovery.
 
 ### Implementation Details
 
-- The earlier `TektonConfig.spec.agenticDiagnosis`, namespace label, annotation, and readiness-condition spellings are API proposals, not existing supported contracts. Define their schema, validation, ownership, and compatibility before implementation.
-- Classify terminal failures and timeouts explicitly; exclude cancellations, graceful stops, diagnosis workloads, and sources claimed by another enrolled investigation path. Agree a bounded lookback so enablement or restart does not analyze an unlimited history.
-- Use source cluster, namespace, and PipelineRun UID as the identity, not name alone. Persist admission and outcome state in Kubernetes so restart, create-response loss, result expiry, or manual result deletion cannot silently admit the same automatic diagnosis again. Deterministic names alone do not satisfy this requirement.
-- Choose the durable record and its retention before implementation. Do not assume an AgenticRun survives its own TTL, and do not add source annotations while claiming the source is never mutated. Any bookkeeping-write permission needs an explicit review.
-- Bound active work per namespace and cluster, evidence bytes, analysis duration, and admission rate. Admission must remain safe across concurrent reconciles and replicas; count-then-create is not sufficient. Coordinate producer backpressure with receiver-side intake governance rather than creating a second generic queue.
-- Define retryable infrastructure failures separately from completed analysis attempts, with bounded retry and age limits. Preserve deferred work through restart without an unbounded in-memory backlog.
+- Agree action placement and availability, the submitting identity, source binding, AgenticRun placement, and the supported API with UI and Lightspeed owners. Same-namespace placement is a candidate, not a verified deployment contract.
+- Submit bounded intent and source identity, not copied logs or credentials. Reuse the Tekton MCP evidence path rather than build another pipeline, networking, or registry diagnosis engine.
+- Use supported AgenticRun conditions for progress and result references to retrieve analysis. The current API references AnalysisResult resources through analysis-step status; do not assume the full report is inline in AgenticRun status. Agree how the console chooses and displays a result or a failed attempt.
+- Define active-run reuse, duplicate-click and lost-create-response handling, explicit re-analysis, retention, and source/result deletion. Opening a page or losing a result must not silently request paid inference; a deliberate retry is a separate user action.
+- Define the result/detail route, pending and denied states, failure and expiry presentation, and return-to-analysis behavior. Reuse or adapt the shared AgenticRun view if it serves the journey; do not create a generic chat UI or hard-code an unagreed route.
+- Validate configured provider, model, MCP, credentials, limits, and supported component versions. Existing Lightspeed installation is a prerequisite to check, not something every Pipelines customer can be assumed to have. Reusing its configuration does not imply inference is free or requires no credentials.
 
 ## Security & Compliance
 
@@ -49,80 +56,80 @@ The producer passes namespace, name, UID, and bounded intent, not copied logs or
 - **Constrain tools and credentials:** expose only the approved read-only analysis capabilities. Deny Secret access, workload mutation, Pod execution, unrelated workloads, and cross-namespace access. Toolset enablement alone does not impose read-only behavior on a shared MCP server. Credential injection belongs to the trusted runtime, never the request, prompt, status, or report.
 - **Constrain data and egress:** treat logs and workload content as untrusted input. Limit evidence and approved destinations, enforce network policy, and document provider data handling. Byte limits and redaction are not guarantees that sensitive data cannot leave the cluster.
 - **Verify transport:** use the supported operator/sandbox TLS contract, preserving certificate-chain and hostname verification and failing closed on invalid required trust. The current sandbox design uses a shared system-plus-custom CA bundle, not isolated per-server trust. This ADR does not reintroduce a separate `caFile` implementation; acceptance requires a security decision on that shared trust boundary.
-- **Protect results:** reports can contain sensitive evidence. Authorize result, status, event, console, and report access at least as strictly as source log access. Admission, RBAC, tool authorization, and result access must agree; a namespace label is not permission to expose reports.
+- **Protect results:** reports can contain sensitive evidence. Authorize result, status, event, console, and report access at least as strictly as source log access. Authorize submission and result retrieval independently; showing or hiding a button is not an authorization boundary.
 
 ## Compatibility & Migration
 
-The feature is disabled by default and must not change existing PipelineRun outcomes or manual invocation. The producer must use a tested, versioned Agentic Operator, sandbox, and MCP combination; current source APIs are not evidence of a supported product combination.
+The proposed action must not change PipelineRun outcomes or remove existing Lightspeed chat, AgentTask invocation, or PaC/Paco workflows. Enable it only for an explicitly configured, supported Lightspeed integration; current source APIs are not evidence of a released product combination.
 
-Disabling enrollment stops new admissions. Before enablement, define how to stop or drain already admitted analysis, revoke credentials, and preserve protected results. Missing dependencies disable diagnosis visibly without degrading otherwise healthy core Pipelines.
+Disabling the integration stops new submissions. Agree how to handle active analyses and retained results on disablement or upgrade. Missing dependencies make the action unavailable or produce a clear diagnosis-specific error without degrading otherwise healthy core Pipelines.
 
 ## Testability
 
-Unit tests cover terminal-reason classification, enrollment precedence, lookback, source UID identity, and bounded retry. Integration tests cover concurrent admission, lost create responses, controller restart, deferred-work recovery, result expiry/deletion, source deletion, and overlapping producers.
+Validate the journey with UI stakeholders against existing Lightspeed chat: selected-workload context, steps required to start diagnosis, asynchronous progress, and the ability to return to an existing result. Any reduction in repeated work or load is a hypothesis to measure, not an established benefit.
 
-Released-stack tests must prove analysis-only behavior, unrelated-resource and Secret denial, no alternative tool bypass, result-access restrictions, evidence/egress bounds, TLS verification and CA rotation, dependency failure, and disable/drain behavior. Record exact source and image versions and distinguish source checks, fixture runs, and real model-backed validation.
+Unit and integration tests cover action availability, authorized creation/reuse, UID binding, duplicate clicks, lost responses, page closure/reopening, result-reference resolution, failure, denial, expiry, and source deletion. Released-stack tests must prove analysis-only behavior, source-scoped evidence access, Secret and unrelated-resource denial, protected report access, evidence/egress bounds, TLS verification, and unavailable-dependency behavior. Record exact source and image versions and distinguish source checks, prototypes, and real model-backed validation.
 
 ## Operational Readiness
 
-Expose diagnosis readiness separately from core Pipelines readiness, with visible skipped, deferred, denied, and failed outcomes. Monitor backlog age, active analyses, admission denials, dependency errors, and model usage without logging credentials or evidence. Pipelines owns producer packaging, upgrades, support, and security response; Lightspeed owners retain the runtime contracts. Named accountable owners and a compatibility/support policy are acceptance requirements, not assumed commitments.
+Agree accountable owners for the console action, integration API, runtime compatibility, and support. Observe request failures, active analysis, completion, result availability, and usage without logging credentials or evidence. Keep diagnosis availability separate from core Pipelines health. The console must not imply analysis succeeded merely because the AgenticRun was created.
 
 ## Scope
 
-- **In scope:** the decision whether to add automatic discovery, its producer boundary, enrollment, analysis-only authorization, lifecycle, and operational requirements.
-- **Out of scope:** automatic remediation, execution, new upstream Tekton APIs, console implementation, replacing PaC/Paco, or selecting AgentTask as a mandatory intermediary. Optional interoperability is separate discovery.
+- **In scope:** the shared agentic diagnosis contract for console or automatic entry points, starting with the console use case, its value over chat, analysis-only request/status/results, authorization, and UI/runtime ownership.
+- **Out of scope:** committing a background failure watcher, automatic remediation, execution, a new diagnostic engine or generic agent API, mandatory AgentTask adoption, replacing PaC/Paco, or moving Git-provider checks/comments into AgenticRun. This ADR does not itself deliver the console implementation.
 
 ## Acceptance Criteria
 
-- [ ] Product and engineering agree the automatic use case, the gap beyond manual/PaC flows, and accountable producer/runtime owners.
-- [ ] The source namespace, identity, analysis-only AgenticRun contract, and supported component versions are validated.
+- [ ] UI, Pipelines, and Lightspeed stakeholders agree the target console user and demonstrate a useful journey beyond existing chat.
+- [ ] Submission, source identity, AgenticRun placement, asynchronous status, result references, and the display/detail-view contract are agreed with accountable owners.
+- [ ] Duplicate submission, active-analysis reuse, explicit re-analysis, browser disconnect, expiry, failure, and unavailable-dependency behavior are defined.
 - [ ] Source-bound evidence authorization, protected result visibility, credentials, egress, and the shared CA trust boundary have security agreement.
-- [ ] Durable deduplication storage, retention, atomic admission, bounded lookback/retry, producer coexistence, and disable/drain semantics are decided and testable.
-- [ ] Configuration/status API, compatibility, packaging, observability, and support responsibilities are agreed.
-- [ ] Delivery follows the current discovery decision; completed MCP work is not reopened or used as evidence that this producer exists.
+- [ ] Supported component versions, configuration prerequisites, disablement, observability, and support responsibilities are validated.
+- [ ] Required reviewers approve the refined proposal; automatic triggering and optional PaC reuse are recorded as separate decisions, not implied delivery commitments.
 
 ## Considered Options
 
 | Option | Advantages | Trade-offs and disposition |
 | --- | --- | --- |
-| Manual diagnosis only / no new producer | No new background component or automatic model cost | Valid baseline and defer/no-go outcome; does not start unattended analysis. |
-| Reuse PaC follow-up investigation | Reuses repository opt-in, failure context, and report publishing | Prefer for its existing repository flow; does not by itself cover every non-PaC PipelineRun. Establish the uncovered use case first. |
-| Standalone Pipelines producer | Owns Tekton-specific discovery without changing upstream execution semantics | Proposed for an agreed gap; adds a component, admission state, RBAC, packaging, and support cost. |
-| Core Tekton controller integration | Sees terminal state directly | Couples core execution to optional inference policy and downstream runtime dependencies; not preferred. |
-| Console background discovery | Reuses a visible user surface | Browser sessions cannot provide reliable unattended reconciliation; retain console for explicit initiation and navigation. |
-| Agentic Operator watches PipelineRuns | Reuses an existing controller deployment | Adds product-specific discovery and Tekton coupling to the shared runtime; keep its contract at submitted runs. |
-| Event- or alert-driven producer | Can reuse an existing reliable intake service | Viable if delivery, replay, UID binding, and ownership are demonstrated; no such product contract is established by this ADR. |
+| Existing Lightspeed chat / no new entry point | Already offers diagnosis through MCP without another integration | Baseline and valid outcome if the proposed action adds insufficient value. |
+| Console action using the existing AgenticRun API | Preserves workload context and exposes a separately managed asynchronous analysis | First candidate to refine; needs an agreed invocation/result contract and evidence that the journey is useful. |
+| Automatic failure producer | Could prepare analysis before a user opens the console | Separate follow-up: needs a justified trigger policy, durable deduplication, admission/cost controls, and a support owner. No watcher is selected now. |
+| AgentTask intermediary | Useful when an explicit Tekton workflow needs interchangeable agent backends | Adds an unnecessary layer to direct console submission; not required here. |
+| PaC/Paco investigation | Serves repository workflows with their existing trigger and report-publishing model | Keep independent; optional Lightspeed reuse requires a consumer benefit that outweighs integration complexity. |
+| Core Tekton or Agentic Operator discovers failures | Reuses an existing controller process | Adds optional diagnosis policy to core execution or product-specific discovery to the shared runtime; not needed for the console-first journey. |
 
 ## Decision Drivers
 
-Reduce repeated triage without duplicating an existing flow; preserve least privilege and provider choice; bound noise and cost; recover safely after restart; keep optional diagnosis independent of core execution; identify a team that can support the additional component.
+Improve the console investigator's journey without duplicating Lightspeed diagnosis; reuse existing MCP work and configured infrastructure; keep the integration small; preserve authorization and provider choice; establish a clear request/result contract before adding automatic discovery.
 
 ## Consequences
 
 ### Benefits
 
-- Enrolled teams could receive timely analysis without changing upstream Tekton execution behavior.
-- Explicit producer/runtime boundaries allow independent lifecycle and security review.
-- Manual-only or reuse of an existing producer remains possible if the additional component is not justified.
+- A user could request diagnosis in the failed PipelineRun's context and return to the analysis later.
+- Lightspeed supplies the diagnosis workflow and Tekton MCP supplies evidence; Pipelines need not build another investigation engine.
+- The first investigation can proceed without a new watcher, a generic adapter, or a PaC migration.
 
 ### Drawbacks
 
-- A producer adds persistent admission state, operational load, support cost, and a cross-team compatibility dependency.
-- Automatic inference can expose workload data and incur cost even when the pipeline failure itself is expected.
+- The console integration may duplicate chat unless its user value is demonstrated, and it creates a cross-team API and support dependency.
+- User-requested inference still consumes model capacity and can send workload data to a configured provider.
 - Shared CA trust is broader than the earlier per-server proposal. Namespace RBAC alone also does not deliver source isolation; both require explicit security treatment.
-- Retaining deduplication state and protecting reports complicate TTL and source cleanup. Delayed analysis may lose evidence to normal workload pruning.
+- Returning to existing analysis requires agreed result retention, access, and stale/deleted-source handling. Evidence may disappear through normal workload pruning.
 
 ### Follow-up actions
 
-Record the open acceptance decisions before planning implementation. Separate producer work, runtime security gaps, and console integration; do not turn bounded prototype evidence into a release commitment.
+Work with UI owners on the invocation/status/result/display contract and compare the journey with existing chat. Refine asynchronous behavior in the proposed follow-up discussion. Revisit automatic discovery only with a concrete additional use case, trigger/cost/lifecycle policy, and owner. Consider PaC/Paco reuse only when a real consumer need justifies it.
 
 ## Dependencies
 
-Requires compatible Agentic Operator/sandbox/MCP delivery, managed endpoint and credential wiring, approved analysis identity and source authorization, receiver-side intake governance, and an authorized report consumer. Shared TLS configuration and toolset enablement are capabilities to validate, not proof that the stronger isolation requirements above are implemented.
+Requires console and Lightspeed owner agreement, compatible Agentic Operator/sandbox/MCP delivery, configured provider and credential wiring, approved analysis identity and source authorization, and protected result retrieval. Reuse the shared detail surface where suitable. Shared TLS configuration and toolset enablement are capabilities to validate, not proof that stronger isolation requirements are implemented.
 
 ## References
 
 - [AgenticRun API and analysis-only workflow](https://github.com/openshift/lightspeed-agentic-operator/blob/main/api/v1alpha1/agenticrun_types.go)
+- [AgenticRun status and AnalysisResult references](https://github.com/openshift/lightspeed-agentic-operator/blob/main/api/v1alpha1/agenticrun_status_types.go)
 - [AgentTask/Lightspeed prototype evidence and gaps](https://github.com/openshift-pipelines/agenttask-adapter-lightspeed/issues/2)
 - [Related PaC follow-up trigger proposal](https://github.com/openshift-pipelines/architecture/pull/14)
 - [Earlier PaC investigation ADR, closed for a more scoped proposal](https://github.com/openshift-pipelines/architecture/pull/12)
@@ -134,3 +141,4 @@ Requires compatible Agentic Operator/sandbox/MCP delivery, managed endpoint and 
 | --- | --- | --- |
 | 2026-09-02 | @waveywaves | Initial proposal. |
 | 2026-11-17 | @waveywaves | Address reviewer feedback on terminology, alternatives, security boundaries, lifecycle gaps, and current scope. Pending stakeholder review. |
+| 2026-11-17 | @waveywaves | Refine after design discussion: console-first request/result contract, asynchronous analysis distinct from automatic triggering, no mandatory AgentTask or PaC/Paco integration. Still proposed. |
