@@ -12,17 +12,27 @@ tags: [pipelines, gitops, traceability]
 
 ## Context
 
-> Can we determine the source commit, Tekton PipelineRuns, and container image built from that, for a currently running application on Kubernetes, after the original Kubernetes resources are deleted?
+> Given a running Kubernetes application, can we trace its image back to a source commit and the Tekton PipelineRuns that built it, even after those runs or earlier rollout resources are deleted?
 
-OpenShift Pipelines requires an end-to-end connection between Tekton build evidence and Argo CD deployments, and also between Argo CD deployments and the containers actually observed running. The source, GitOps and image identities describe different sets of data. The existing APIs and independently pruned archives do not describe that end-to-end history.
+To answer this after a run is deleted, we need to save its build details alongside the workload's image information.
 
-This answer is conditionally proposed. Facts must be collected before they disappear. Afterward, they may be retained and queried independently. History that has not been collected cannot be recovered. A missing promotion record, for example, or multiple builds that result in the same image must remain a gap or an ambiguous answer.
+Several runs can produce the same image. Without a promotion record naming the selected run, return the possible builds.
+
+## Scope
+
+Start with an optional OpenShift Pipelines integration that traces Tekton builds to Argo CD workloads. The first prototype follows Deployment ownership through ReplicaSets to Pods. Use saved checkout results and declared image outputs. Record which build was promoted.
+
+Konflux integration and automated remediation or promotion are out of scope. This also excludes a new signing service or new core Tekton APIs/CRDs. Keep full artifacts and logs in their existing stores.
+
+## Decision Drivers
+
+Keep run details after pruning so a query can still reach the build's source commit. Store deployment history separately from the CI archive, with its own retention settings.
 
 ## Decision
 
-Use CDEvents v0.5.1 with a versioned lineage profile, and prefer to use a separate Go collector/query service backed by PostgreSQL outside etcd. Results remains the CI archive, content of OCI artifacts remain in registries, and the projection retains the identity evidence and relationship for deployment history.
+Use CDEvents v0.5.1 with a versioned lineage profile. Prefer a separate Go collector/query service backed by PostgreSQL outside etcd. This projection stores the collected resource IDs and their relationships. Results keeps the CI archive; artifact content stays in OCI registries.
 
-Select PostgreSQL for now for transactions, normal indexes, and bounded SQL traversal. Keep extending Results as a serious alternative to prototype: the placement decision pertains to ownership of the API, authorization and retention, while the database decision pertains to storage and query operations.
+PostgreSQL lets us save an event and its links in one transaction, then query those relationships with SQL. Compare this service with an extension to Results using the same fixtures. That comparison needs to cover who owns the query API and how long each option keeps deployment history.
 
 ### Architectural Overview
 
@@ -49,7 +59,7 @@ flowchart TB
   Q --> R
 ```
 
-These components are still in the proposal stage. Collectors read source APIs, and write retained observations after profile validation. The query service authorizes a caller and then follows the stored relations, and returns evidence, and uncertainty together with the source commits, runs, and image observations.
+Collectors validate the fields they read before saving them. The query service checks access before following the stored links. It shows the reported container image with its build and source details, or marks the missing link.
 
 ### Implementation Details
 
@@ -57,64 +67,13 @@ These components are still in the proposal stage. Collectors read source APIs, a
 
 | Step | Input and action | Retained output or failure |
 | --- | --- | --- |
-| 1. Capture | List/watch Tekton, Argo and workload APIs; read retained Results and required OCI descriptors. | Scoped UID/version observations, field evidence, capture coverage and checkpoints. Relisting after an expired watch cannot recover missed deleted objects. |
-| 2. Normalize | Apply configured checkout/output mappings and typed ownership, management and artifact joins. Validate pinned base/event schemas and the lineage profile. | CDEvents plus typed references; missing fields remain unknown. Do not fabricate required fields to emit a build, artifact or deployment event. |
-| 3. Persist | Commit accepted event bytes, queryable JSONB and derived links transactionally before acknowledging delivery or advancing capture checkpoints. | Stable event IDs and first receipt time. Identical retries are idempotent; conflicting payloads are rejected. |
-| 4. Resolve/query | Resolve a live application/workload to scoped UIDs, or accept an archived UID. Traverse authorized retained evidence with row/depth limits and cycle detection. | Per-container runtime observations, source/build candidates, GitOps inputs and evidence at every hop; unresolved or unsupported joins stay explicit. |
-| 5. Replay | Apply event-time and knowledge-time cutoffs to events and relationship availability. | Reproducible historical answers; late evidence cannot appear in an earlier knowledge view. |
+| 1. Capture | List/watch the scoped Tekton and Argo resources. Read the workload APIs and retained Results records as needed. Save the required OCI descriptors. | Save the UID/resourceVersion and the fields behind each link. Record when each watch started and its last saved position. Relisting after watch expiry only recovers resources that still exist. |
+| 2. Normalize | Apply the configured checkout/output mappings. Keep the relationship type with each link. Validate events against the pinned schemas and profile. | Leave absent fields unknown. If no valid event can be formed, keep the allowed source fields separately and record why normalization stopped. |
+| 3. Persist | Save source evidence and original event bytes in the same transaction as the JSONB view and currently known links. Only then acknowledge delivery or advance the capture checkpoint. | Keep the first receipt time for an identical retry. Reject conflicting bytes under an existing event ID; corrections need a new ID. |
+| 4. Resolve/query | Start with a live workload UID or a previously saved UID. Follow only links the caller may read, with row/depth limits and cycle detection. | Show the running image per container. Keep candidate builds when promotion evidence is missing. Include the fields supporting each result and mark links that could not be made. |
+| 5. Replay | Filter by when the event happened and by when the service learned about it. Apply these cutoffs to resolved links too. | Use only information available at the requested cutoff. A later resolution must not change an earlier answer. Replay needs the required evidence and resolution versions to remain stored; expired records leave gaps. |
 
-Collection will not be a single, integrated snapshot spanning all APIs. It will record the start of data coverage, gaps (outages) and watch cursor expirations. Backfill will use anything that is still accessible, like surviving objects or data retained in an archive, but will not be able to restore a discarded Pod image ID or owner UID. Keep required evidence locally in the projection. Do not rely only on external records that may expire.
-
-#### Identities and evidence
-
-| Relationship | Required evidence and limit |
-| --- | --- |
-| Pod/container to workload | Registered cluster ID, namespace UID, Pod UID and container name; verify Pod controller ownerReference UID, ReplicaSet UID and Deployment UID. Preserve requested image, reported imageID, running state and observation time per container. Names/selectors are insufficient. |
-| Workload to Argo Application | Application UID, Argo installation/tracking configuration and observed workload UID. Argo resource lists/tracking names alone do not identify an object after same-name recreation. Tracking means management, not Kubernetes ownership. |
-| GitOps revision to workload | Preserve all resolved sources/revisions, render inputs, operation phase/resource results and observed workload generation/template. Compared revision or Healthy/Synced status alone cannot attribute an old Pod to a commit. Missing apply binding returns candidate revisions. |
-| Image to build | Repository-qualified algorithm/digest, PipelineRun UID(s), child TaskRun evidence and declared image outputs. Retain run outcomes. Several runs can produce identical content; digest equality does not select the run that caused deployment. Equal digests or repository aliases also do not prove registry fetch origin. |
-| Build to application source | Configured checkout/input mapping retaining repository and resolved full commit. Resolver refSource describes the Pipeline/Task definition and is not necessarily the application checkout. Preserve multiple inputs. |
-| Promotion to GitOps change | Explicit evidence naming the selected run, artifact and immutable GitOps commit or override change. A matching name or image alone does not establish this causal step. |
-
-Preserve imageID verbatim: runtimes do not necessarily lead to a repository qualified manifest digest. If a build publishes an OCI index and a pod runs a platform manifest, archive a verified descriptor path between the two. Absent that path, content identity is undetermined. Return mixed replicas, sidecars and rolling versions separately.
-
-argo status.sync.revision records the revision that was compared. Operation targets, successful history and tracking metadata still need a workload UID/template binding that is associated with a workload in a contemporaneous state. For multi-source Apps, retain the source-index mapping and render overrides. An adapter that cannot establish this binding reports the limitation instead of selecting the latest revision.
-
-#### Event profile and relationship language
-
-```text
-CDEvent {
-  context: {specversion, source, id, type, timestamp, schemaUri,
-            chainId?, links?}
-  subject: {id, source?, content}
-  customData: {resourceRefs, inputs, outputs, gitops, containers, evidence}
-}
-```
-
-This proposal describes a profile shape rather than a schema. customData describes typed, scoped references, checkout/build outputs and GitOps inputs, per-container observations, and retained field evidence. schemaUri identifies a more restrictive schema. Configuration of a Collector is expressed as a mapping of producer fields; undeclared parameter/result names are ignored.
-
-Stable administrator-assigned identities must be provided to each registered cluster, different from the identity associated with the API address. Replacement clusters must also be assigned a new identity. Namespaces must be bound to UIDs and tenants through trusted configuration. Profile producers retain globally unique event IDs across retries. Ingestion must reject cross-source ID collisions within a tenant. Unqualified link targets cannot be resolved by guessing.
-
-CDEvents links connect context IDs for events. Embedded PATH.from references the preceding event, pointing from it to the containing event. In this profile, RELATION/TRIGGER targets the causing event, and RELATION/ARTIFACT targets an artifact event from an execution/deployment event. Ownership and Argo Management remain separately typed evidence. chainId groups events without proving causality or completeness.
-
-Pin envelope, event-type and profile validation independently. Use the released v0.5.1 fixtures; event-type versions are separate. The pinned specification contains an older specversion prose reference, so the conformance review must resolve that inconsistency prior to production adoption.
-
-> RFC 3339 defines a consistent format for timestamps to be used in queries for cutoffs. It does not define clock synchronization or causality.
-
-> RFC 6901 defines JSON Pointers to the retained field values, to let each relationship identify the evidence on which it is based.
-
-#### PostgreSQL storage
-
-```text
-events(tenant, source, id, event_time timestamptz,
-       received_at timestamptz, raw bytea, payload jsonb)
-links(tenant, from_source, from_id, target_id, target_source?,
-      type, kind, known_at timestamptz)
-```
-
-Key events by tenant/source/id with profile wide id uniqueness within a tenant. Accepted CDEvent bytes are preserved in BYTEA, and a validated and normalized query projection in JSONB are maintained. Unresolved targets and versioned resolution/expiry changes are retained. Prevent resolution leaking into earlier knowledge views by using the known_at attribute. Store source times if evidence exists; otherwise, label the times as observation times.
-
-Use B-tree indexes for identities, times, and link endpoints, GIN indexes where JSONB filters are necessary, and bounded recursive SQL. There are no essential PostgreSQL extensions. pg_stat_statements, which is also optional, requires preloading for measurement of queries. Query budgets, retention volume, and restore behavior need to be measured rather than assumed.
+These API reads happen at different times. Record when collection started and where it was interrupted. A backfill can use surviving resources or archives; it cannot recreate a Pod imageID or owner UID that was never saved. Keep the required history locally before upstream records expire.
 
 #### Worked trace after pruning
 
@@ -128,53 +87,60 @@ source repository S @ full commit A
      retained OCI descriptor path D -> M when D is an image index
 ```
 
-After build run R is pruned, a current query for W follows its observed running Pod/container set and returns A, R, and image evidence when this chain still applies. GitOps commit B remains distinct from application source A. Missing evidence of promotion or descriptors leaves candidates and an explicit gap.
+After R is pruned, a query for W follows its current Pods and can still return A and R from the saved trace, while those links still match the Pods. Keep GitOps commit B separate from application source A. Missing promotion records leave candidate builds. A missing OCI descriptor path leaves the image relationship unresolved.
 
-If X and O are pruned later, a historical query for archived O at its observation time uses the UID chain that is retained. A current query resolves the current Pod set. Historical image observations are not silently shown as the image that is running currently.
+If X and O are later deleted, query saved O at its observation time using the archived UID chain. A current query follows the current Pod set; it must not reuse O's old image as the current answer.
 
-## Security & Compliance
+#### Identities and evidence
 
-Collectors require scoped read access to certain source APIs, not Secret access or deployment write permissions. Only accept evidence fields that have been approved. Authenticate ingestion and obtain tenant/cluster identity from trusted configuration, not from event claims. Query authorization must cover the mentioned namespaces and retained tenant identities including namespace deletion and recreation.
-
-Apply tenant-scoped row security to events, links and evidence using restricted database roles, without table ownership, superuser or BYPASSRLS privileges. Cross-tenant digest matches should not disclose hidden builds. Original bytes needed by a verifier are preserved; CDEvents and API observations are assertions, not provenance of builds authenticated by the system.
-
-## Compatibility & Migration
-
-Deploy opt-in and backfill only retained evidence. Existing pipelines will continue to operate. Complete traces require configured source and output mappings and might require additional producer results. Stop collectors/query exposure to roll back without changing Tekton or Argo reconciliation. Preserve the database for inspection; schema upgrades and restorations require a versioned migration path.
-
-## Testability
-
-| Scenario | Required result |
+| Relationship | Required evidence and limit |
 | --- | --- |
-| Capture, prune original runs/Pods/ReplicaSets, then query | Same retained identity chain and evidence; historical UID lookup works without those live objects. |
-| Cold start, watch expiration or outage during pruning | Coverage gaps and unavailable history; no reconstructed claims. |
-| Same names with new UIDs; ambiguous builds/promotion | Separate lineages and all supported candidates; no guessed causal link. |
-| Multiple containers/replicas, multi-source Argo, OCI index/platform differences | Separate observations and source mappings; verified descriptor path or explicit unsupported/unresolved result. |
-| Duplicate/conflicting IDs, out-of-order links, cycles and late resolution | Idempotent ingestion, rejected conflicts, bounded traversal and stable dual-time replay. |
-| Tenant isolation, retention expiry and backup restoration | No unauthorized evidence; expired gaps are visible; restored/replayed queries reproduce answers within the retained interval. |
+| Pod/container to workload | Keep the registered cluster ID with the namespace UID, Pod UID and container name. Verify that the Pod controller ownerReference UID matches the ReplicaSet UID, then match its controller reference to the Deployment UID. Save the requested and reported image references with the imageID. Record the container state and observation time. Names or selectors alone cannot identify the same object after recreation. |
+| Workload to Argo Application | Save the Application UID and its Argo installation/tracking settings. Bind the tracked resource to the observed workload UID; names alone cannot distinguish a recreated object. Argo tracking records management, not Kubernetes ownership. |
+| GitOps revision to workload | Keep resolved revisions matched to their sources and render inputs. Save operation phase and the dry-run flag with per-resource results. Bind these to the observed workload UID/generation/template. Healthy/Synced or compared revision alone cannot attribute an old Pod to a commit; a missing binding leaves candidate revisions. |
+| Image to build | Keep the repository-qualified algorithm/digest with each PipelineRun UID. Save the child TaskRun evidence by UID as well. Save declared outputs and run outcomes. More than one run can produce the same content. Equal digests do not select the run that caused deployment or show which registry served the image. |
+| Build to application source | Use the configured checkout/input mapping to save the repository and resolved full commit. Resolver refSource identifies the Pipeline/Task definition, which may differ from the application checkout. Keep each input when there is more than one. |
+| Promotion to GitOps change | Save the record naming the selected run and artifact, tied to the immutable GitOps commit or override change. A matching name or image alone cannot show which run was selected. |
 
-## Operational Readiness
+Keep imageID exactly as reported by the runtime. It may not be a repository-qualified manifest digest. When a build publishes an OCI index but a Pod runs a platform manifest, save the verified descriptor path between them. Without it, leave that match unresolved. Report each container separately, including sidecars and Pods from different rollouts.
 
-Proposed ownership gives the Pipelines integration team the responsibility for collector/profile/query/schema maintenance, and installation operators the responsibility for PostgreSQL backup, retention and recovery. Actual owners should be confirmed prior to acceptance. Watch for capture lag, missing coverage, validation/conflict counts and unresolved edges. Query budgets and restore health should also be monitored. Define a goal for retained history and prune Results, registry and projection accordingly.
+Argo status.sync.revision records a comparison. To tie it to a running Pod, save the applied workload UID/template with the operation results from that time. Successful history and tracking metadata alone do not supply that binding. For multi-source Applications, keep revisions matched to their source indexes and save render overrides. If the binding is missing, return candidate revisions.
 
-Kubernetes rollout history, Argo history, and Results retention are independently bounded. Results watcher finalizers have a storage deadline that can release deletion before storage is confirmed, and records can be updated or deleted. Therefore, projections must retain enough of the evidence captured before the source of that evidence is deleted, and expose gaps in retention when evidence is lost.
+#### Event profile and relationship language
 
-## Scope
+Use customData for scoped resource references and the fields used to make each link. Include the actual checkout/build outputs and the GitOps inputs. Store per-container observations with pointers to the saved supporting values. schemaUri identifies the stricter profile schema. Map the producer's fields explicitly; a familiar parameter name does not prove which source was checked out or which image was built.
 
-In scope: optional downstream integration of OpenShift Pipelines tracing of Tekton builds to Argo CD workloads and its evidence profile, placement of storage/query, and acceptance plan. Initial prototypes must demonstrate a declared source/output contract and explicit deployment intent. Coverage of the adapter must be shown separately.
+```text
+CDEvent {
+  context: {specversion, source, id, type, timestamp, schemaUri,
+            chainId?, links?}
+  subject: {id, source?, content}
+  customData: {resourceRefs, inputs, outputs, gitops, containers, evidence}
+}
+```
 
-Out of scope: Konflux integration, automated remediation or promotion, new core Tekton APIs/CRDs, full artifact/log duplication, new signing service. Changes required in Tekton Results or other upstream APIs would require their own upstream proposal/review.
+Register each cluster under a stable administrator-assigned ID, independent of its API address. A replacement cluster gets a new ID. Bind namespaces to tenants using trusted configuration and the namespace UID. Keep event IDs stable across retries. IDs must be unique across producers within a tenant so unqualified link targets have one answer. Reject collisions and leave missing targets unresolved.
 
-## Acceptance Criteria
+CDEvents links reference event context IDs. PATH.from records progression from the preceding event to the containing event. In this profile, RELATION/TRIGGER targets the event that caused the current event. RELATION/ARTIFACT points from an execution/deployment event to an artifact event. Keep Kubernetes ownership and Argo management as separately typed evidence. chainId groups events; it does not establish causality or prove the chain is complete. Evidence record IDs and Kubernetes UIDs are not context-link targets.
 
-| Gate | Evidence needed before acceptance |
-| --- | --- |
-| Contract and reviewer agreement | Pipeline/Results, Argo and security reviewers agree on cluster/tenant identity, producer mappings, promotion evidence, profile validation and unsupported cases. Named reviewers and implementation owners are confirmed. |
-| Placement comparison | Run the same fixtures against a Results-extension prototype and the separate PostgreSQL projection; record API/storage changes, authorization behavior, retention and operational ownership. |
-| Correctness | Demonstrate the worked trace after deletion and every Testability case, including missing evidence and dual-time replay. |
-| Operational feasibility | Record query/ingestion measurements, deployment/version compatibility, retention capacity, migration/rollback and backup/restore results. No production numbers are claimed here. |
+Pin envelope validation separately from the event types and lineage profile. Use context.specversion 0.5.1 from the released fixtures. Event-type versions are separate. The pinned spec still contains older specversion prose; resolve that mismatch in conformance checks before production use.
 
-This ADR is still being proposed. Gates separate a design direction from a supported and implemented capability. Other factors, such as profile schemas, prototype evidence, deployment compatibility, and owner/reviewer agreement, are still necessary.
+> RFC 3339 defines the timestamp format for query cutoffs. It does not synchronize clocks or establish causality.
+
+> RFC 6901 defines JSON Pointers. Use them to identify the saved field behind a relationship.
+
+#### PostgreSQL storage
+
+```text
+events(tenant, source, id, event_time timestamptz,
+       received_at timestamptz, raw bytea, payload jsonb)
+links(tenant, from_source, from_id, target_id, target_source?,
+      type, kind, known_at timestamptz)
+```
+
+Key events by tenant/source/id, with IDs unique across producers within a tenant. Keep accepted event bytes in BYTEA and a queryable copy in JSONB. Saved source evidence needs its own storage alongside these event/link tables. Keep unresolved targets and record when a link was resolved or expired. Filter known_at by the query's knowledge cutoff so a later resolution cannot change an earlier answer. Use the source timestamp when known; otherwise label the collector's observation time. Deleted evidence leaves the query incomplete.
+
+Use B-tree indexes for event identities and link endpoints. Add indexes for the time filters. Use GIN where JSONB filtering needs it, and limit recursive queries. No PostgreSQL extension is required. Optional pg_stat_statements needs preloading to measure queries. Measure query time and stored data size in the prototypes, then test how long a restore takes.
 
 ## Considered Options
 
@@ -182,39 +148,73 @@ This ADR is still being proposed. Gates separate a design direction from a suppo
 
 | Option | Pros | Cons and reason |
 | --- | --- | --- |
-| Separate PostgreSQL projection (preferred) | Independent CD retention and query lifecycle; byte-preserving evidence; tenant and relationship rules can evolve separately. | Another service/database responsibility, migrations, ingestion lag and duplicated CI identity indexes. Preferred to keep deployment history separate from the CI archive. |
-| Extend Tekton Results | Reuse archive APIs, namespace authorization and established operations; generic JSON Records provide an integration surface. | Still needs Argo/runtime capture, graph queries and CD retention policy. Mutable JSONB Records do not preserve original serialization; compare encoded original bytes or durable external pointers under deployed API-size and parent-retention limits. Evaluate with the same fixtures. |
-| Live API query / do nothing | No new history service or database. | Cannot answer after uncaptured resources are deleted; useful only for current evidence. |
+| Separate PostgreSQL projection (preferred) | Deployment history gets its own retention policy. Save evidence byte-for-byte and change the query rules without changing the CI archive. | Adds a service/database to operate, including migrations. Collection can lag, and some CI identity indexes are duplicated. Keeps deployment history separate from CI pruning. |
+| Extend Tekton Results | Reuse the archive APIs and namespace authorization. Generic JSON Records can carry the extra data. | Still needs Argo/runtime collection and history queries, with a CD retention policy. Direct JSONB storage loses original serialization. Compare encoded original bytes or durable external pointers under the deployed API-size and parent-retention limits, using the same fixtures. |
+| Live API query / do nothing | No new history service or database. | Can only query records that remain available. It cannot reconstruct required details that were never captured before deletion. |
 
 ### Storage backend
 
 | Option | Pros | Cons and reason |
 | --- | --- | --- |
-| PostgreSQL (chosen) | Transactions, JSONB plus BYTEA, indexes, row security and recursive queries without a graph extension. | Requires schema migrations, backup/restore and measured traversal budgets. Chosen as the first production candidate. |
-| SQLite | Small local footprint; already used by the offline PoC. | Existing PoC uses one connection; multi-tenant fleet operations, HA and recovery remain unvalidated. Keep for local experimentation. |
-| Graph database, e.g. Neo4j | Natural relationship/path representation. | Additional backend expertise and security/retention operations; no measured advantage over bounded SQL for this contract. Revisit if query measurements justify it. |
-
-## Decision Drivers
-
-We aim to retain answers after pruning, provide explicit uncertainty, separate source from GitOps revisions, reuse CI archives, isolate tenants, and have an operable downstream component. Interoperability is important to us, but using a standard envelope alone does not help provide missing identity joins.
+| PostgreSQL (chosen) | Save events and links transactionally. Query JSONB alongside the original BYTEA data, using row security and recursive SQL without a graph extension. | Needs versioned migrations and tested backup/restore procedures. Set traversal limits from query measurements. |
+| SQLite | Small local setup; already used by the offline PoC. | The PoC uses one connection. Shared multi-tenant operation and HA have not been tested, nor has recovery. Keep it for local experiments. |
+| Graph database, e.g. Neo4j | Represents relationships directly and provides path queries. | Adds another backend to operate, with its own permissions and retention setup. Compare it with PostgreSQL before choosing it for query performance. |
 
 ## Consequences
 
-Expected benefit: Operators can trace container observations that are captured to their source/build candidates after resource deletion. A separate projection keeps its own retention and query policy while referring to CI identifiers in Results.
+An operator can follow a captured container image back to candidate builds after the original runs are deleted. The separate service keeps deployment history for as long as that installation needs, while referring to CI records in Results.
 
-Costs include operational ownership and ingestion lag. Missing deletion observations cause gaps. Profiles and adapters require maintenance. Limitations to trust or completeness include unsigned claims, missing promotion receipts, expired evidence and unsupported runtime IDs.
+The service adds another component to run. Its view can lag behind the source APIs, and missed captures leave holes in the history. Adapters must be updated when source fields or event schemas change. An unsigned claim cannot authenticate a build. Missing promotion receipts or unsupported runtime IDs can prevent a complete trace, as can expired evidence.
 
 ## Dependencies
 
-Check the versions of the deployed Tekton, Argo, Kubernetes, Results and PostgreSQL against the profile. TEPs 0192 and 0193 propose artifact metadata and OCI storage. They are not adopted prerequisites and do not replace deployment observation. If accepted and interoperable, reuse their interfaces through a separate integration review.
+Check the profile against the deployed versions of Tekton and Argo CD, including the Kubernetes fields they report. Check Results compatibility and the PostgreSQL version too. TEPs 0192 and 0193 propose artifact metadata and OCI storage. They are possible future inputs, not prerequisites for this ADR.
+
+## Security & Compliance
+
+Give collectors scoped read access to the source APIs. They do not need Secret access or deployment write permissions. Accept only approved evidence fields. Authenticate ingestion and obtain tenant/cluster identity from trusted configuration. Authorize each referenced namespace, including saved identities for namespaces that have since been deleted or recreated.
+
+Apply tenant-scoped row security to events and links, including their saved evidence. The service's database roles must not own the tables. They must also lack SUPERUSER and BYPASSRLS. A shared digest must not reveal another tenant's builds. Historical queries use the caller's current permissions.
+
+A CDEvent or API status field alone does not prove who built an image. Keep original signed bytes if verification needs them and policy permits storing them. A redacted or reserialized copy cannot replace those bytes. If they cannot be kept, report verification as unavailable.
+
+## Compatibility & Migration
+
+Make collection opt-in. Backfill only records that are still available. Existing pipelines keep working; a complete trace needs configured checkout/output mappings and may need extra producer results. Roll back by stopping collection and query access, without changing Tekton or Argo reconciliation. Keep the database for inspection and version its schema migrations. Restore procedures must handle those schema versions.
+
+## Operational Readiness
+
+The Pipelines integration team could maintain the collectors and query service, including the event profile and schema. The installation owner would operate PostgreSQL and set data retention. Confirm who handles backups and recovery before accepting the design. Watch capture lag and failed validation. Track unresolved links alongside query limits, and test restores. Coordinate retention with the registry and Results so required records remain available.
+
+Kubernetes keeps a limited number of old ReplicaSets. Argo CD has its own history limit, and Results has a separate retention policy. The Results watcher can allow requested deletion when its finalizer storage deadline expires, even if storage was not confirmed. Copy the needed details before those records disappear. Mark the query incomplete when required records have expired.
+
+## Testability
+
+| Scenario | Required result |
+| --- | --- |
+| Capture runs/pods/replica sets, prune then query | The saved UID chain still answers the historical query without those live objects. |
+| Start collection with no saved state, then test watch expiry. Also cover an outage while records are being pruned. | Show where capture stopped or history is unavailable. Do not invent the missing records. |
+| Use the same name with a new UID or leave build/promotion evidence ambiguous. | Keep the UID histories separate. Return candidate builds when promotion evidence is missing. |
+| Test multiple containers/replicas. Test multi-source Argo and OCI index/platform differences. | Keep each container observation and match revisions to source indexes. Require a verified OCI descriptor path or leave the image match unresolved/unsupported. |
+| Duplicate or conflicting IDs, out-of-order links, cycles and resolution in later periods | Identical retries change nothing. Reject conflicts. Limit traversal and keep late resolution out of earlier replay results. |
+| Test tenant isolation. Check queries after retention expiry and after a backup restore. | Hide unauthorized records. Mark expired evidence as missing; restored queries reproduce answers for the period whose evidence and resolution history remain stored. |
 
 ## PoCs
 
-The public capture and synthetic SQLite history PoCs demonstrate selected observations and local replay. They do not implement this CDEvents profile, validate PostgreSQL, demonstrate resolution of arbitrary runtime images, or build authenticated provenance. The next steps of the implementation are the acceptance fixtures and two-placement comparison.
+The public capture PoC reads build and deployment details. The SQLite PoC replays synthetic history. Neither implements this CDEvents profile or validates PostgreSQL. They also do not establish authenticated provenance for the captured workloads or resolve every runtime imageID format.
+
+## Acceptance Criteria
+
+| Gate | Required evidence and stage |
+| --- | --- |
+| Contract and reviewer agreement | Agree on cluster/tenant identity with security reviewers. Pipeline/Results and Argo reviewers must check the producer mappings and promotion evidence. Confirm the profile validation rules and unsupported cases. Name the reviewers and implementation owners. |
+| Placement comparison | Run the same focused fixtures against a Results-extension prototype and the separate PostgreSQL service before ADR acceptance. Compare API/storage changes and authorization. Record the retention settings and who operates each option. |
+| Correctness | Before calling the implementation supported, show the worked trace after deletion and run every Testability case, including missing evidence and dual-time replay. |
+| Operational feasibility | Before supported rollout, measure ingestion and query behavior on the deployed versions. Check retention capacity. Test schema migration/rollback and backup/restore. |
 
 ## References
 
-The structure follows the example of the diagrams provided in the current-quarter’s PipelineRun-dependencies and credential-service proposals. These examples demonstrate writing and design, not adopted dependencies.
+For layout examples, see the Q4 2026 PipelineRun-dependencies and credential-service proposals below.
 
 - [ADR process and product/upstream scope](./0001-adopt-adrs.md).
 - [PipelineRun dependencies proposal #14](https://github.com/chmouel/osp-architecture/blob/c8cccdf532ff0571c616a58f69b29869e1e9dcec/ADR/0003-pipelinerun-dependencies.md) and [credential-service proposal #17](https://github.com/chmouel/osp-architecture/blob/32e5771fa8d384f2a7be64860080650605d3c4bf/ADR/0003-github-credential-service.md).
