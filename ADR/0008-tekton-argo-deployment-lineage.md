@@ -22,7 +22,7 @@ Several runs can produce the same image. Without a promotion record naming the s
 
 Start with an optional OpenShift Pipelines integration that traces Tekton builds to Argo CD workloads. The first prototype follows Deployment ownership through ReplicaSets to Pods. Use saved checkout results and declared image outputs. Record which build was promoted.
 
-Konflux integration and automated remediation or promotion are out of scope. This also excludes a new signing service or new core Tekton APIs/CRDs. Keep full artifacts and logs in their existing stores.
+Use the Konflux build-service deployment as the reference workflow for the Tekton/Argo adapters. Konflux is the workload being traced, not a required platform integration. Reading Konflux Snapshot or Release CRDs and automating promotion remain out of scope. This also excludes a new signing service or new core Tekton APIs/CRDs. Keep full artifacts and logs in their existing stores.
 
 ## Decision Drivers
 
@@ -39,6 +39,7 @@ PostgreSQL lets us save an event and its links in one transaction, then query th
 ```mermaid
 flowchart TB
   T["Tekton API + Results<br/>Run inputs and outputs"]
+  G["Git hosting read APIs<br/>Promotion PR and GitOps commits"]
   A["Argo CD API<br/>Application and GitOps revision"]
   K["Kubernetes API<br/>Workload ownership and Pods"]
   O["OCI registry<br/>Digest and manifest descriptors"]
@@ -49,6 +50,7 @@ flowchart TB
   Q["Authorized lineage query<br/>Traverse retained evidence"]
   R["Source commit + PipelineRuns + images<br/>Evidence, gaps and ambiguity"]
   T --> C
+  G --> C
   A --> C
   K --> C
   O --> C
@@ -63,6 +65,29 @@ Collectors validate the fields they read before saving them. The query service c
 
 ### Implementation Details
 
+#### Reference deployment: Konflux build-service
+
+The reference is Konflux's own build-service deployment. At the pinned source revision, its Tekton build declares IMAGE_URL, IMAGE_DIGEST, CHAINS-GIT_URL and CHAINS-GIT_COMMIT results. In infra-deployments, a separate promotion PipelineRun proposes changing the production overlay to the staging source reference and image tag. The build-service ApplicationSet generates Argo Applications that watch environment-specific paths in that GitOps repository.
+
+Public promotion PR 15213 merged on November 2, 2026, changing the production source reference and image tag to 4f3863f7bc1c31c2b627716b75182453933e56b9. The ApplicationSet was still present when inspected on November 23. This proves published configuration and merged promotion history, not a currently running deployment. The build output and deployment use different image repositories; retain the release/copy and digest evidence before joining them. A source-SHA image tag does not select a PipelineRun or establish an immutable image digest.
+
+```text
+build-service source @ 4f3863f...
+  -> Tekton build results: source commit, image URL and digest
+  -> [release/copy and selected-build evidence still required]
+infra-deployments PR 15213
+  -> GitOps merge commit 07cd1db...
+  -> production overlay: source ref and image tag 4f3863f...
+  -> configured ApplicationSet -> generated Argo Application
+  -> [actual sync, workload UID and runtime image evidence still required]
+```
+
+| Evidence | Source mapping for this workflow | Limit |
+| --- | --- | --- |
+| Build | `konflux-ci/build-service` at `4f3863f7bc1c31c2b627716b75182453933e56b9`, `.tekton/build-service-push.yaml`; Pipeline results `IMAGE_URL`, `IMAGE_DIGEST`, `CHAINS-GIT_URL`, `CHAINS-GIT_COMMIT` | Capture actual PipelineRun/TaskRun UIDs, results and outcome; the definition is not an execution receipt. |
+| Promotion | `redhat-appstudio/infra-deployments` at `d544ce36099dd5f34049fef8532766e1027fbb55`, `.tekton/build-service-prod-overlay-update.yaml` and `.tekton/tasks/promote-component.yaml`; PR 15213 merge `07cd1db2167484a9e2042050600e19c0d2366de9` | The script opens a PR with a generic body; it does not record a selected build run UID. |
+| Desired deployment | `components/build-service/production/base/kustomization.yaml`; ApplicationSet at `argo-cd-apps/base/member/infra-deployments/build-service/build-service.yaml` | Resolve the generated Application's effective destination and source path; the base ApplicationSet defaults to staging. Do not infer production routing from its name. |
+
 #### Capture-to-query process
 
 | Step | Input and action | Retained output or failure |
@@ -74,6 +99,31 @@ Collectors validate the fields they read before saving them. The query service c
 | 5. Replay | Filter by when the event happened and by when the service learned about it. Apply these cutoffs to resolved links too. | Use only information available at the requested cutoff. A later resolution must not change an earlier answer. Replay needs the required evidence and resolution versions to remain stored; expired records leave gaps. |
 
 These API reads happen at different times. Record when collection started and where it was interrupted. A backfill can use surviving resources or archives; it cannot recreate a Pod imageID or owner UID that was never saved. Keep the required history locally before upstream records expire.
+
+#### Argo CD adapter
+
+Implement the adapter as read-only Go list/watch collectors for Applications and, when available, ApplicationSets in the configured Argo namespaces, plus Deployments, ReplicaSets and Pods in approved destination namespaces. The Argo control cluster can differ from the workload cluster; register both identities and resolve Application destination names or servers through trusted configuration. Save each object's UID, resourceVersion and observation time before advancing that watch's checkpoint. Generated Applications supply per-destination identity and sync status; an ApplicationSet template alone is desired configuration.
+
+Read tracking settings from approved configuration, including the tracking method, instance label key and installation ID. Check a tracking annotation against the resource's own group, kind, namespace and name; do not accept copied annotations as management proof. Label-only tracking can collide and must remain ambiguous when it cannot identify one Application. Retain the observed Application and workload UIDs separately. Tracking links mean Argo management, not Kubernetes ownership or proof of a particular sync.
+
+| Input | Fields to retain in allowlisted source evidence |
+| --- | --- |
+| Application identity and destination | `metadata.uid`, `metadata.resourceVersion`, namespace UID; `spec.destination.name`, `server`, `namespace`; trusted Argo installation and destination cluster IDs |
+| Effective render inputs | `spec.source` or `spec.sources`; approved path, chart, Kustomize, Helm and plugin inputs; operation source overrides; redact sensitive values |
+| Sync execution | `status.operationState.phase`, `startedAt`, `finishedAt`; `operation.sync.dryRun`; `syncResult.revision`/`revisions`, `source`/`sources` and `resources` |
+| Resource sync results | `group`, `version`, `kind`, `namespace`, `name`, `status`, `hookType`, `hookPhase`, `syncPhase`, `images`; no UID field in the pinned Argo type |
+| Workload identity and rollout | Deployment UID/generation/template; ReplicaSet and Pod controller ownerReference UIDs; per-container requested image and status `imageID`, state and observation time |
+| Tracking configuration | Approved `application.resourceTrackingMethod`, `application.instanceLabelKey`, `installationID`; resource tracking/installation annotations or configured label |
+
+Capture operationState with its phase, timestamps, original sync request and syncResult before a later operation overwrites it. Keep resolved revisions paired with syncResult source definitions, including multi-source indexes and render overrides. Per-resource results identify group, kind, namespace and name but do not contain a workload UID. A GET after sync, Healthy/Synced status or a matching current template cannot by itself prove which UID and template that operation applied. Without retained apply evidence binding the operation to that identity and template, return candidate GitOps revisions. Establishing this binding on the supported Argo version is an explicit prototype gate; do not invent a standard Argo field for it.
+
+A query starts with the authorized destination cluster, namespace and Deployment UID. Follow controller ownerReference UIDs through ReplicaSets to each Pod, then return requested images and raw runtime imageIDs per container. Join declared build outputs only through verified digest relationships and retained promotion evidence. The current promotion script's generic PR body does not select a build run UID, so a unique deployment-causing run is not established by that PR alone. Save both the application source commit and the GitOps merge commit, and preserve missing links and multiple candidate builds in the response.
+
+| Prototype step | Required output |
+| --- | --- |
+| Capture the chosen workflow | Sanitized actual PipelineRun/TaskRun, promotion PR/commit, generated Application, sync and workload exports; version and capture boundaries recorded. Public source files alone leave execution links unresolved. |
+| Normalize and query | Versioned CDEvents profile plus saved evidence; typed management, ownership, image and promotion links; partial answers for missing apply/build-selection evidence. |
+| Compare placements | Feed the same captured cases and expected partial/complete answers to both the Results-extension and separate PostgreSQL prototypes. |
 
 #### Worked trace after pruning
 
@@ -174,6 +224,8 @@ Check the profile against the deployed versions of Tekton and Argo CD, including
 
 Give collectors scoped read access to the source APIs. They do not need Secret access or deployment write permissions. Accept only approved evidence fields. Authenticate ingestion and obtain tenant/cluster identity from trusted configuration. Authorize each referenced namespace, including saved identities for namespaces that have since been deleted or recreated.
 
+Grant collectors get/list/watch only for the configured Argo and workload resources in approved namespaces. If tracking settings are read from argocd-cm, grant get on that named ConfigMap, not broad access to ConfigMaps or Secrets. Git hosting and registry adapters use separate read-only identities; allowlist source repositories and destinations before fetching evidence. Do not reuse Argo repository or cluster Secrets. Exclude credential-bearing URLs and sensitive render values from retained fields, and enforce the existing tenant authorization on the resulting links.
+
 Apply tenant-scoped row security to events and links, including their saved evidence. The service's database roles must not own the tables. They must also lack SUPERUSER and BYPASSRLS. A shared digest must not reveal another tenant's builds. Historical queries use the caller's current permissions.
 
 A CDEvent or API status field alone does not prove who built an image. Keep original signed bytes if verification needs them and policy permits storing them. A redacted or reserialized copy cannot replace those bytes. If they cannot be kept, report verification as unavailable.
@@ -196,6 +248,8 @@ Kubernetes keeps a limited number of old ReplicaSets. Argo CD has its own histor
 | Start collection with no saved state, then test watch expiry. Also cover an outage while records are being pruned. | Show where capture stopped or history is unavailable. Do not invent the missing records. |
 | Use the same name with a new UID or leave build/promotion evidence ambiguous. | Keep the UID histories separate. Return candidate builds when promotion evidence is missing. |
 | Test multiple containers/replicas. Test multi-source Argo and OCI index/platform differences. | Keep each container observation and match revisions to source indexes. Require a verified OCI descriptor path or leave the image match unresolved/unsupported. |
+| Konflux source-SHA tag, image copied between repositories, or two successful builds with the same digest | Require immutable image/descriptor and release/copy evidence. PR 15213 alone must not select a build run UID or registry origin. |
+| Argo main advances while old Pods run; dry-run, failed or partial sync; operationState overwritten; workload recreated; copied tracking annotation | Preserve operation/source and UID histories. Only bind covered resources with retained apply evidence; expose missing bindings instead of attributing the current revision to old Pods. |
 | Duplicate or conflicting IDs, out-of-order links, cycles and resolution in later periods | Identical retries change nothing. Reject conflicts. Limit traversal and keep late resolution out of earlier replay results. |
 | Test tenant isolation. Check queries after retention expiry and after a backup restore. | Hide unauthorized records. Mark expired evidence as missing; restored queries reproduce answers for the period whose evidence and resolution history remain stored. |
 
@@ -209,6 +263,7 @@ The public capture PoC reads build and deployment details. The SQLite PoC replay
 | --- | --- |
 | Contract and reviewer agreement | Agree on cluster/tenant identity with security reviewers. Pipeline/Results and Argo reviewers must check the producer mappings and promotion evidence. Confirm the profile validation rules and unsupported cases. Name the reviewers and implementation owners. |
 | Placement comparison | Run the same focused fixtures against a Results-extension prototype and the separate PostgreSQL service before ADR acceptance. Compare API/storage changes and authorization. Record the retention settings and who operates each option. |
+| Argo reference workflow | Use the Konflux build-service exports for both placements. Argo reviewers must validate effective Application routing, tracking settings and the operation-to-workload UID/template binding. Missing live exports, release/copy records or selected-run receipts remain explicit gaps. |
 | Correctness | Before calling the implementation supported, show the worked trace after deletion and run every Testability case, including missing evidence and dual-time replay. |
 | Operational feasibility | Before supported rollout, measure ingestion and query behavior on the deployed versions. Check retention capacity. Test schema migration/rollback and backup/restore. |
 
@@ -220,6 +275,8 @@ For layout examples, see the Q4 2026 PipelineRun-dependencies and credential-ser
 - [PipelineRun dependencies proposal #14](https://github.com/chmouel/osp-architecture/blob/c8cccdf532ff0571c616a58f69b29869e1e9dcec/ADR/0003-pipelinerun-dependencies.md) and [credential-service proposal #17](https://github.com/chmouel/osp-architecture/blob/32e5771fa8d384f2a7be64860080650605d3c4bf/ADR/0003-github-credential-service.md).
 - [CDEvents v0.5.1 specification](https://github.com/cdevents/spec/blob/df02ce0b6563a13bf35cc109993b03b18da8a14a/spec.md), [event links](https://github.com/cdevents/spec/blob/df02ce0b6563a13bf35cc109993b03b18da8a14a/links.md), [CI events](https://github.com/cdevents/spec/blob/df02ce0b6563a13bf35cc109993b03b18da8a14a/continuous-integration.md) and [deployment events](https://github.com/cdevents/spec/blob/df02ce0b6563a13bf35cc109993b03b18da8a14a/continuous-deployment.md).
 - [Argo Application fields](https://github.com/argoproj/argo-cd/blob/7cbfbe9b3677e33f8bd500797fb4ea10bed047b5/pkg/apis/application/v1alpha1/types.go), [tracking](https://github.com/argoproj/argo-cd/blob/7cbfbe9b3677e33f8bd500797fb4ea10bed047b5/docs/user-guide/resource_tracking.md) and [multiple sources](https://github.com/argoproj/argo-cd/blob/7cbfbe9b3677e33f8bd500797fb4ea10bed047b5/docs/user-guide/multiple_sources.md).
+- Konflux reference: [build-service build](https://github.com/konflux-ci/build-service/blob/4f3863f7bc1c31c2b627716b75182453933e56b9/.tekton/build-service-push.yaml), [promotion PipelineRun](https://github.com/redhat-appstudio/infra-deployments/blob/d544ce36099dd5f34049fef8532766e1027fbb55/.tekton/build-service-prod-overlay-update.yaml), [promotion Task](https://github.com/redhat-appstudio/infra-deployments/blob/d544ce36099dd5f34049fef8532766e1027fbb55/.tekton/tasks/promote-component.yaml) and [merged promotion PR 15213](https://github.com/redhat-appstudio/infra-deployments/pull/15213).
+- Konflux desired state: [production overlay](https://github.com/redhat-appstudio/infra-deployments/blob/d544ce36099dd5f34049fef8532766e1027fbb55/components/build-service/production/base/kustomization.yaml) and [build-service ApplicationSet](https://github.com/redhat-appstudio/infra-deployments/blob/d544ce36099dd5f34049fef8532766e1027fbb55/argo-cd-apps/base/member/infra-deployments/build-service/build-service.yaml).
 - [Tekton PipelineRun](https://github.com/tektoncd/pipeline/blob/3449daa318e7868447688b4dfbc6ab4e5c838d3c/pkg/apis/pipeline/v1/pipelinerun_types.go), [TaskRun](https://github.com/tektoncd/pipeline/blob/3449daa318e7868447688b4dfbc6ab4e5c838d3c/pkg/apis/pipeline/v1/taskrun_types.go), [resolver provenance](https://github.com/tektoncd/pipeline/blob/3449daa318e7868447688b4dfbc6ab4e5c838d3c/pkg/apis/pipeline/v1/provenance.go) and [checkout commit result](https://github.com/tektoncd/catalog/blob/ee409b23543881457c2f35cbd630ea55732b1856/task/git-clone/0.9/git-clone.yaml).
 - [Kubernetes ownership fields](https://github.com/kubernetes/apimachinery/blob/398326f9ce6a1007d932b935b675435d6f5e1ad2/pkg/apis/meta/v1/types.go), [container status](https://github.com/kubernetes/api/blob/a2c84304d35fb510370c5281c8e3a2234cc81e46/core/v1/types.go) and [watch history](https://github.com/kubernetes/website/blob/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/reference/using-api/api-concepts.md).
 - [OCI image indexes](https://github.com/opencontainers/image-spec/blob/4feed4a6674e59d301b9294f187ac46acb2de99f/image-index.md).
@@ -236,3 +293,4 @@ For layout examples, see the Q4 2026 PipelineRun-dependencies and credential-ser
 | 2026-11-18 | @waveywaves | Initial proposed Tekton/Argo lineage ADR. |
 | 2026-11-19 | @waveywaves | Adopted CDEvents and outlined PostgreSQL storage. |
 | 2026-11-20 | @waveywaves | Expanded the central question, end-to-end process, architecture diagram, alternatives and acceptance evidence after review feedback. |
+| 2026-11-23 | @waveywaves | Grounded the proposal in Konflux build-service promotion and specified Argo collection, tracking, query and evidence gates. |
